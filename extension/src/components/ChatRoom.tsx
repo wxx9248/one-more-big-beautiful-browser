@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
-import { Input } from "@/src/components/ui/input";
 import { Card } from "@/src/components/ui/card";
+import { Textarea } from "@/src/components/ui/textarea";
+import { ArrowUp } from "lucide-react";
 
 interface Message {
   id: string;
@@ -58,11 +59,8 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
   return (
     <div className="fixed top-0 left-0 h-screen w-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="border-b p-4 flex items-center justify-between">
+      <div className="border-b p-4">
         <h1 className="text-xl font-semibold">Chat Room</h1>
-        <Button variant="outline" size="sm" onClick={onLogout}>
-          Log Out
-        </Button>
       </div>
 
       {/* Messages Area */}
@@ -91,16 +89,17 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
       </div>
 
       {/* Input Area */}
-      <div className="border-t p-4">
-        <div className="flex gap-2">
-          <Input
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
+      <div className="pb-2 px-2">
+        <div className="flex rounded-md border min-h-10 flex-col">
+          <Textarea
             placeholder="Type a message..."
-            className="flex-1"
+            className="rounded-none mt-2 resize-none text-sm px-2 py-1 focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 border-0 shadow-none min-h-10 h-auto"
           />
-          <Button onClick={handleSendMessage}>Send</Button>
+          <div className="flex gap-2 px-1.5 pb-1.5 items-center justify-end">
+            <Button className="rounded-full h-6 w-6 flex items-center justify-center cursor-pointer">
+              <ArrowUp className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>
