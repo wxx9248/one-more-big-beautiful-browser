@@ -1,13 +1,6 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
-
-// JWT Secret - In production, use environment variable
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  "your-super-secret-jwt-key-change-this-in-production";
-const JWT_EXPIRES_IN = "7d"; // Token expires in 7 days
 
 const DB_PATH = path.join(process.cwd(), "data", "users.json");
 
@@ -83,43 +76,4 @@ export function createUser(
   writeUsers(users);
 
   return newUser;
-}
-
-/**
- * Generate a real JWT token
- */
-export function generateToken(user: User): string {
-  const payload = {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-  };
-
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: JWT_EXPIRES_IN,
-  });
-}
-
-/**
- * Verify and decode a JWT token
- */
-export function verifyToken(token: string): any {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch (error) {
-    console.error("Token verification failed:", error);
-    return null;
-  }
-}
-
-/**
- * Decode a JWT token without verification (for debugging)
- */
-export function decodeToken(token: string): any {
-  try {
-    return jwt.decode(token);
-  } catch (error) {
-    console.error("Token decode failed:", error);
-    return null;
-  }
 }

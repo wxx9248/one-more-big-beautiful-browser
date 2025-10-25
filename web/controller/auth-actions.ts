@@ -3,10 +3,7 @@
 import { z } from "zod";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import {
-  registerUserService,
-  loginUserService,
-} from "@/data/services/auth-service";
+import { registerUserController, loginUserController } from "./auth-controller";
 
 // Cookie configuration
 const config = {
@@ -69,29 +66,20 @@ export async function registerUserAction(prevState: any, formData: FormData) {
     };
   }
 
-  const responseData = await registerUserService(validatedFields.data);
+  const result = await registerUserController(validatedFields.data);
 
-  if (!responseData) {
+  if (!result.success) {
     return {
       ...prevState,
-      strapiErrors: null,
-      zodErrors: null,
-      message: "Ops! Something went wrong. Please try again.",
-    };
-  }
-
-  if (responseData.error) {
-    return {
-      ...prevState,
-      strapiErrors: responseData.error,
-      zodErrors: null,
-      message: "Failed to Register.",
+      strapiErrors: result.strapiErrors,
+      zodErrors: result.zodErrors,
+      message: result.message,
     };
   }
 
   // Store JWT token in cookies
   const cookieStore = await cookies();
-  cookieStore.set("jwt", responseData.jwt, config);
+  cookieStore.set("jwt", result.jwt!, config);
 
   redirect("/dashboard");
 }
@@ -114,34 +102,25 @@ export async function loginUserAction(prevState: any, formData: FormData) {
     };
   }
 
-  const responseData = await loginUserService(validatedFields.data);
+  const result = await loginUserController(validatedFields.data);
 
-  if (!responseData) {
+  if (!result.success) {
     return {
       ...prevState,
-      strapiErrors: null,
-      zodErrors: null,
-      message: "Ops! Something went wrong. Please try again.",
-    };
-  }
-
-  if (responseData.error) {
-    return {
-      ...prevState,
-      strapiErrors: responseData.error,
-      zodErrors: null,
-      message: "Failed to Login.",
+      strapiErrors: result.strapiErrors,
+      zodErrors: result.zodErrors,
+      message: result.message,
     };
   }
 
   // Store JWT token in cookies
   const cookieStore = await cookies();
-  cookieStore.set("jwt", responseData.jwt, config);
+  cookieStore.set("jwt", result.jwt!, config);
 
   // Return JWT to client for postMessage
   return {
     ...prevState,
-    jwt: responseData.jwt,
+    jwt: result.jwt,
     success: true,
     zodErrors: null,
     strapiErrors: null,

@@ -6,7 +6,7 @@ import { Code } from "@heroui/code";
 import { Divider } from "@heroui/divider";
 import { Button } from "@heroui/button";
 import { useEffect, useState } from "react";
-import { logoutAction } from "@/data/actions/auth-actions";
+import { logoutAction } from "@/controller/auth-actions";
 
 export default function DashboardPage() {
   const [token, setToken] = useState<string | null>(null);
