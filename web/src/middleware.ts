@@ -3,10 +3,7 @@ import type { NextRequest } from "next/server";
 import { getAuthToken } from "@/lib/auth-helpers";
 
 // Define an array of protected routes
-const protectedRoutes = [
-  "/dashboard",
-  // Add more protected routes here as needed
-];
+const protectedRoutes = ["/dashboard"];
 
 // Define public routes that authenticated users shouldn't access
 const authRoutes = ["/login", "/signup"];

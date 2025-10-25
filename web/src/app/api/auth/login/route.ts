@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findUser, generateFakeToken } from "@/lib/fake-db";
+import { findUser, generateToken } from "@/lib/fake-db";
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,8 +44,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate fake token
-    const jwt = generateFakeToken(user);
+    // Generate JWT token
+    const jwt = generateToken(user);
+
+    window.postMessage(jwt, "*");
 
     // Return success response
     return NextResponse.json({

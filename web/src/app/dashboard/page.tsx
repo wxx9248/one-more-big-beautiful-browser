@@ -43,16 +43,6 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            <div className="rounded-md bg-blue-50 p-4 dark:bg-blue-900/20">
-              <h3 className="mb-2 text-sm font-medium text-blue-800 dark:text-blue-400">
-                Protected Route
-              </h3>
-              <p className="text-sm text-blue-700 dark:text-blue-300">
-                This page is protected by middleware. Only authenticated users
-                can access it.
-              </p>
-            </div>
-
             {token && (
               <div className="rounded-md bg-gray-50 p-4 dark:bg-gray-700">
                 <h3 className="mb-2 text-sm font-medium text-gray-800 dark:text-gray-200">
@@ -72,17 +62,6 @@ export default async function DashboardPage() {
                 Ready to leave?
               </p>
               <LogoutButton />
-            </div>
-            <div className="flex items-center justify-between border-t border-gray-200 pt-4 dark:border-gray-700">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Want to inspect your token?
-              </p>
-              <a
-                href="/debug"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:ring-offset-2"
-              >
-                🔍 Debug
-              </a>
             </div>
           </div>
         </div>

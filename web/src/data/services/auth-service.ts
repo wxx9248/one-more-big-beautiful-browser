@@ -1,7 +1,7 @@
 // Configure your backend URL here
-// Use localhost for local API routes
+// Use localhost for local API routes (must match your dev server port)
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3000";
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
 
 export interface RegisterUserProps {
   username: string;
@@ -10,7 +10,7 @@ export interface RegisterUserProps {
 }
 
 export interface LoginUserProps {
-  identifier: string; // Can be username or email
+  identifier: string;
   password: string;
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findUser, createUser, generateFakeToken } from "@/lib/fake-db";
+import { findUser, createUser, generateToken } from "@/lib/fake-db";
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,8 +34,8 @@ export async function POST(request: NextRequest) {
     // Create new user
     const newUser = createUser(username, email, password);
 
-    // Generate fake token
-    const jwt = generateFakeToken(newUser);
+    // Generate JWT token
+    const jwt = generateToken(newUser);
 
     // Return success response
     return NextResponse.json({
