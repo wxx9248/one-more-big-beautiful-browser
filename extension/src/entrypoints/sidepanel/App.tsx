@@ -3,7 +3,6 @@ import { browser } from "wxt/browser";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { LoginPage } from "@/src/components/LoginPage";
 import { ChatRoom } from "@/src/components/ChatRoom";
-import "./App.css";
 
 function App() {
   const [authState, setAuthState] = useState<AuthState>({
