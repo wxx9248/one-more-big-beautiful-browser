@@ -11,4 +11,8 @@ export default defineConfig({
   },
 
   entrypointsDir: "src/entrypoints",
+
+  vite: () => ({
+    plugins: [tailwindcss()],
+  }),
 });
