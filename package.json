@@ -10,7 +10,7 @@
     "install": "pnpm run install:extension && pnpm run install:web && pnpm run install:server",
     "dev:extension": "cd extension && pnpm dev",
     "dev:web": "cd web && pnpm dev -p 3001",
-    "dev:server": "cd server && SERVER_PORT=8080 uv run python main.py",
+    "dev:server": "cd server && SERVER_PORT=8000 uv run python main.py",
     "dev": "concurrently -n \"extension,web,server\" -c \"blue,green,yellow\" \"pnpm run dev:extension\" \"pnpm run dev:web\" \"pnpm run dev:server\"",
     "start": "pnpm run dev",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\"",

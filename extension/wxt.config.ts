@@ -6,7 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
-    permissions: ["sidePanel"],
+    permissions: ["sidePanel", "storage", "tabs"],
+    host_permissions: ["http://localhost:3001/*", "https://app.example.com/*"],
   },
 
   entrypointsDir: "src/entrypoints",

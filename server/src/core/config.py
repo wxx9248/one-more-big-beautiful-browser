@@ -41,11 +41,38 @@ class LoggingSettings(BaseSettings):
         case_sensitive = False
 
 
+class LLMAPIKeys(BaseSettings):
+    """API keys for different LLM providers."""
+
+    anthropic_api_key: str | None = Field(None, description="Anthropic API key")
+    openai_api_key: str | None = Field(None, description="OpenAI API key")
+    google_api_key: str | None = Field(None, description="Google API key")
+
+    class Config:
+        env_prefix = ""
+        case_sensitive = False
+
+
+class LangGraphSettings(BaseSettings):
+    """LangGraph LLM configuration."""
+
+    default_model: str = Field(
+        "anthropic:claude-sonnet-4-5",
+        description="Default model to use (format: provider:model-name)",
+    )
+    temperature: float = Field(0.7, description="Temperature for generation")
+
+    class Config:
+        env_prefix = "LANGGRAPH_"
+        case_sensitive = False
+
+
 class APISettings(BaseSettings):
     """API configuration."""
 
     # API path prefixes
     test_prefix: str = Field("/api/test", description="Test API prefix")
+    chat_prefix: str = Field("/api/chat", description="Chat API prefix")
 
     # Internal API prefixes (no authentication required)
     internal_prefix: str = Field(
@@ -77,6 +104,8 @@ class Settings(BaseSettings):
     server: ServerSettings = ServerSettings()
     api: APISettings = APISettings()
     logging: LoggingSettings = LoggingSettings()
+    llm_api_keys: LLMAPIKeys = LLMAPIKeys()
+    langgraph: LangGraphSettings = LangGraphSettings()
 
     @classmethod
     def validate_environment(cls, v):
