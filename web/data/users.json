@@ -1,0 +1,16 @@
+[
+  {
+    "id": "16fb750b-88a4-4503-9e00-d293343dc1ef",
+    "username": "kenny",
+    "email": "kennytabletennis@gmail.com",
+    "password": "123456",
+    "createdAt": "2025-10-25T21:31:44.968Z"
+  },
+  {
+    "id": "e2d907c1-42d6-4a8e-ad3b-7d297d22153b",
+    "username": "test",
+    "email": "test@gamil.com",
+    "password": "123456",
+    "createdAt": "2025-10-25T21:33:02.885Z"
+  }
+]
