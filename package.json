@@ -12,10 +12,29 @@
     "dev:web": "cd web && pnpm dev -p 3000",
     "dev:server": "cd server && PORT=8080 uv run python main.py",
     "dev": "concurrently -n \"extension,web,server\" -c \"blue,green,yellow\" \"pnpm run dev:extension\" \"pnpm run dev:web\" \"pnpm run dev:server\"",
-    "start": "pnpm run dev"
+    "start": "pnpm run dev",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "lint:extension": "cd extension && pnpm run compile",
+    "lint:web": "cd web && pnpm run lint",
+    "lint:server": "cd server && uv run black --check .",
+    "lint": "pnpm run format:check && pnpm run lint:extension && pnpm run lint:web && pnpm run lint:server",
+    "lint:fix": "pnpm run format && cd server && uv run black .",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,json,css,md}": [
+      "prettier --write"
+    ],
+    "*.py": [
+      "cd server && uv run black"
+    ]
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.3.0",
+    "prettier": "^3.6.2"
   },
   "keywords": [],
   "author": "",

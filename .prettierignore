@@ -1,0 +1,33 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+build
+.next
+.wxt
+*.tsbuildinfo
+
+# Lockfiles
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+uv.lock
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode
+.idea
