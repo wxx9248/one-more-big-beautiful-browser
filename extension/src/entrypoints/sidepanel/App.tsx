@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
-import { Input } from "@/src/components/ui/input";
 import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
-import { ArrowUp, ArrowUpWideNarrow } from "lucide-react";
+import { ArrowUp } from "lucide-react";
 
 interface Message {
   id: string;
@@ -93,7 +92,7 @@ function App() {
             className="rounded-none mt-2 resize-none text-sm px-2 py-1 focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 border-0 shadow-none min-h-10 h-auto"
           />
           <div className="flex gap-2 px-1.5 pb-1.5 items-center justify-end">
-            <Button className="rounded-full h-6 w-6 flex items-center justify-center">
+            <Button className="rounded-full h-6 w-6 flex items-center justify-center cursor-pointer">
               <ArrowUp className="size-4" />
             </Button>
           </div>
