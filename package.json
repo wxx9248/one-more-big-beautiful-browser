@@ -1,0 +1,24 @@
+{
+  "name": "one-more-big-beautiful-browser",
+  "version": "1.0.0",
+  "description": "One More Big Beautiful Browser - Monorepo with extension, web, and server",
+  "private": true,
+  "scripts": {
+    "install:extension": "cd extension && pnpm install",
+    "install:web": "cd web && pnpm install",
+    "install:server": "cd server && uv sync",
+    "install": "pnpm run install:extension && pnpm run install:web && pnpm run install:server",
+    "dev:extension": "cd extension && pnpm dev",
+    "dev:web": "cd web && pnpm dev -p 3000",
+    "dev:server": "cd server && PORT=8080 uv run python main.py",
+    "dev": "concurrently -n \"extension,web,server\" -c \"blue,green,yellow\" \"pnpm run dev:extension\" \"pnpm run dev:web\" \"pnpm run dev:server\"",
+    "start": "pnpm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.14.0"
+}
