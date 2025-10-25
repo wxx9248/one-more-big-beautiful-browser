@@ -1,15 +1,4 @@
-"""Server main file"""
-
-# Internal imports
-import os
-
-# External imports
-import uvicorn
-from fastapi import FastAPI
-
-app = FastAPI()
+from src.main import main
 
 if __name__ == "__main__":
-
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    main()
