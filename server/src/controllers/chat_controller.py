@@ -115,22 +115,22 @@ class ChatController:
         # This makes the backend stateless and more scalable
         return graph_builder.compile()
 
-    async def chat(
+    async def chat_stream(
         self,
         messages: list,
         model: str | None = None,
         temperature: float | None = None,
     ):
         """
-        Process chat messages using LangGraph.
+        Stream chat messages using LangGraph.
 
         Args:
             messages: Complete list of message objects with role and content (including full history)
             model: Optional model to use (format: "provider:model-name")
             temperature: Optional temperature for generation
 
-        Returns:
-            Dict with response message and used model
+        Yields:
+            Tokens from the LLM as they are generated
         """
         # Use provided model or default
         used_model = model or self.default_model
@@ -147,13 +147,9 @@ class ChatController:
         # Build graph with the selected LLM
         graph = self._build_graph(llm)
 
-        # Invoke the graph with converted messages
-        result = graph.invoke({"messages": converted_messages})
-
-        # Extract the last message (the assistant's response)
-        last_message = result["messages"][-1]
-
-        return {
-            "message": last_message.content,
-            "model": used_model,
-        }
+        # Stream tokens using messages mode
+        async for message_chunk, metadata in graph.astream(
+            {"messages": converted_messages}, stream_mode="messages"
+        ):
+            if message_chunk.content:
+                yield message_chunk.content
