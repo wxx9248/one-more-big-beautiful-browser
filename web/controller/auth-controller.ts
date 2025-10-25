@@ -1,5 +1,21 @@
 import { z } from "zod";
 import { findUser, createUser } from "@/lib/fake-db";
+import jwt from "jsonwebtoken";
+
+// JWT Secret - In production, use environment variable
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  "your-super-secret-jwt-key-change-this-in-production";
+const JWT_EXPIRES_IN = "7d"; // Token expires in 7 days
+
+// Cookie configuration
+export const cookieConfig = {
+  maxAge: 60 * 60 * 24 * 7, // 1 week
+  path: "/",
+  domain: process.env.HOST ?? "localhost",
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+};
 
 // Validation schema for registration
 const schemaRegister = z.object({
@@ -44,6 +60,21 @@ export interface AuthResult {
 }
 
 /**
+ * Generate a real JWT token
+ */
+function generateToken(user: any): string {
+  const payload = {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+  };
+
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+  });
+}
+
+/**
  * Controller function to register a user (for use in API routes)
  */
 export async function registerUserController(userData: {
@@ -78,9 +109,12 @@ export async function registerUserController(userData: {
   // Create new user
   const newUser = createUser(username, email, password);
 
+  // Generate real JWT token
+  const jwt = generateToken(newUser);
+
   return {
     success: true,
-    jwt: "mock-jwt-token", // Simple mock token
+    jwt,
     user: {
       id: newUser.id,
       username: newUser.username,
@@ -134,9 +168,12 @@ export async function loginUserController(userData: {
     };
   }
 
+  // Generate real JWT token
+  const jwt = generateToken(user);
+
   return {
     success: true,
-    jwt: "mock-jwt-token", // Simple mock token
+    jwt,
     user: {
       id: user.id,
       username: user.username,

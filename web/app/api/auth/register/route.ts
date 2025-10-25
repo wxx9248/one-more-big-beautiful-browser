@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { registerUserController } from "@/controller/auth-controller";
+import {
+  registerUserController,
+  cookieConfig,
+} from "@/controller/auth-controller";
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,12 +47,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Return success response with JWT
-    return NextResponse.json({
+    // Create response with JWT
+    const response = NextResponse.json({
       jwt: result.jwt,
       user: result.user,
       message: result.message,
     });
+
+    // Set JWT cookie
+    response.cookies.set("jwt", result.jwt!, cookieConfig);
+
+    return response;
   } catch (error) {
     console.error("Registration error:", error);
     return NextResponse.json(
