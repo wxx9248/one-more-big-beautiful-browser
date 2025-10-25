@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from .config import get_settings
-from ..api.routers import test
+from ..api.routers import test, chat
 
 
 def setup_routers(app: FastAPI) -> None:
@@ -28,3 +28,4 @@ def setup_routers(app: FastAPI) -> None:
 
     # Core system endpoints
     app.include_router(test.router, prefix=settings.api.test_prefix, tags=["test"])
+    app.include_router(chat.router, prefix=settings.api.chat_prefix, tags=["chat"])
