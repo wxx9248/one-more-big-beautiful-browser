@@ -4,6 +4,7 @@ import {
   type AuthMessage,
   type AuthState,
 } from "@/src/types/auth";
+import type { ToolMessage, ToolResponse } from "@/src/types/tools";
 
 // In-memory auth state
 let authState: AuthState = {
@@ -35,17 +36,27 @@ export default defineBackground(() => {
   // Listen for messages from content scripts and side panel
   browser.runtime.onMessage.addListener(
     (
-      message: AuthMessage,
+      message: AuthMessage | ToolMessage,
       sender,
-      sendResponse: (response?: AuthState) => void,
+      sendResponse: (response?: AuthState | ToolResponse) => void,
     ) => {
       console.log("Background received message:", message);
 
-      switch (message.type) {
+      // Handle tool calls
+      if (message.type === "TOOL_CALL") {
+        handleToolCall(
+          message as ToolMessage,
+          sendResponse as (response: ToolResponse) => void,
+        );
+        return true; // Keep channel open for async response
+      }
+
+      // Handle auth messages
+      switch ((message as AuthMessage).type) {
         case MessageType.AUTH_TOKEN:
         case MessageType.AUTH_SUCCESS:
           // Store the token
-          handleAuthSuccess(message.token);
+          handleAuthSuccess((message as AuthMessage).token);
           sendResponse(authState);
           break;
 
@@ -136,4 +147,143 @@ function notifyAuthStateChange(): void {
   // This can be used to notify the side panel or other extension pages
   // For now, they will query the state when needed
   console.log("Auth state changed:", authState);
+}
+
+/**
+ * Handle tool calls by routing to active tab's content script
+ */
+async function handleToolCall(
+  message: ToolMessage,
+  sendResponse: (response: ToolResponse) => void,
+): Promise<void> {
+  const { toolName, requestId } = message;
+  console.log(`[Background] Routing tool call: ${toolName}`);
+
+  try {
+    // Special handling for screenshot capture
+    if (toolName === "captureScreenshot") {
+      const screenshot = await captureScreenshot();
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: screenshot,
+      });
+      return;
+    }
+
+    // Special handling for tab management tools
+    if (toolName === "getAllTabs") {
+      const tabs = await getAllTabs();
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: tabs,
+      });
+      return;
+    }
+
+    if (toolName === "switchToTab") {
+      const result = await switchToTab(message.params.tabId);
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
+    // Get active tab
+    const tabs = await browser.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    const activeTab = tabs[0];
+
+    if (!activeTab?.id) {
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: false,
+        error: "No active tab found",
+      });
+      return;
+    }
+
+    // Forward message to content script
+    const response = await browser.tabs.sendMessage(activeTab.id, message);
+    sendResponse(response);
+  } catch (error: any) {
+    console.error(`[Background] Tool call failed:`, error);
+    sendResponse({
+      type: "TOOL_RESPONSE",
+      requestId,
+      success: false,
+      error: error.message || "Tool execution failed",
+    });
+  }
+}
+
+/**
+ * Capture screenshot of visible viewport
+ */
+async function captureScreenshot(): Promise<{
+  dataUrl: string;
+  timestamp: number;
+}> {
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+
+  if (!activeTab?.id) {
+    throw new Error("No active tab found");
+  }
+
+  const dataUrl = await browser.tabs.captureVisibleTab(activeTab.windowId, {
+    format: "png",
+  });
+
+  return {
+    dataUrl,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * Get all open tabs
+ */
+async function getAllTabs(): Promise<
+  Array<{ id?: number; url: string; title: string }>
+> {
+  const tabs = await browser.tabs.query({});
+  return tabs.map((tab) => ({
+    id: tab.id,
+    url: tab.url || "",
+    title: tab.title || "",
+  }));
+}
+
+/**
+ * Switch to a specific tab
+ */
+async function switchToTab(
+  tabId: number,
+): Promise<{ success: boolean; message: string }> {
+  try {
+    await browser.tabs.update(tabId, { active: true });
+    const tab = await browser.tabs.get(tabId);
+    if (tab.windowId) {
+      await browser.windows.update(tab.windowId, { focused: true });
+    }
+    return {
+      success: true,
+      message: `Switched to tab: ${tab.title}`,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `Failed to switch tab: ${error.message}`,
+    };
+  }
 }
