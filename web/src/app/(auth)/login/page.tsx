@@ -1,20 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { loginUserAction } from "@/data/actions/auth-actions";
 
 const INITIAL_STATE = {
   zodErrors: null,
   strapiErrors: null,
   message: null,
+  jwt: null,
+  success: false,
 };
 
 export default function LoginPage() {
+  const router = useRouter();
   const [formState, formAction] = useActionState(
     loginUserAction,
     INITIAL_STATE
   );
+
+  // Post message when JWT is available
+  useEffect(() => {
+    if (formState?.jwt && formState?.success) {
+      window.postMessage({ type: "JWT_TOKEN", jwt: formState.jwt }, "*");
+      // Redirect to dashboard after posting message
+      router.push("/dashboard");
+    }
+  }, [formState?.jwt, formState?.success, router]);
 
   return (
     <div className="w-full max-w-md">

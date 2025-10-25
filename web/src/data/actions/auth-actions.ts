@@ -138,7 +138,15 @@ export async function loginUserAction(prevState: any, formData: FormData) {
   const cookieStore = await cookies();
   cookieStore.set("jwt", responseData.jwt, config);
 
-  redirect("/dashboard");
+  // Return JWT to client for postMessage
+  return {
+    ...prevState,
+    jwt: responseData.jwt,
+    success: true,
+    zodErrors: null,
+    strapiErrors: null,
+    message: "Login successful",
+  };
 }
 
 /**
