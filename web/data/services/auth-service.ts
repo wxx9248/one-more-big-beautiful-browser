@@ -1,8 +1,3 @@
-// Configure your backend URL here
-// Use localhost for local API routes (must match your dev server port)
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
-
 export interface RegisterUserProps {
   username: string;
   email: string;
@@ -20,10 +15,8 @@ export interface LoginUserProps {
  * @returns Response data with jwt token and user info, or error
  */
 export async function registerUserService(userData: RegisterUserProps) {
-  const url = new URL("/api/auth/register", BACKEND_URL).toString();
-
   try {
-    const response = await fetch(url, {
+    const response = await fetch("/api/auth/register", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -49,10 +42,8 @@ export async function registerUserService(userData: RegisterUserProps) {
  * @returns Response data with jwt token and user info, or error
  */
 export async function loginUserService(userData: LoginUserProps) {
-  const url = new URL("/api/auth/login", BACKEND_URL).toString();
-
   try {
-    const response = await fetch(url, {
+    const response = await fetch("/api/auth/login", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
