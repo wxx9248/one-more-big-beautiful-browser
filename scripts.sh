@@ -49,7 +49,7 @@ start_projects() {
     EXTENSION_PID=$!
     
     echo -e "${GREEN}Starting web (Next.js) on port 3000...${NC}"
-    cd "$SCRIPT_DIR/web" && pnpm dev -p 3000 &
+    cd "$SCRIPT_DIR/web" && pnpm dev -p 3001 &
     WEB_PID=$!
     
     echo -e "${GREEN}Starting server (Python) on port 8080...${NC}"
