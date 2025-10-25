@@ -134,6 +134,7 @@ importers:
       '@react-aria/visually-hidden':
         specifier: 3.8.28
         version: 3.8.28(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+<<<<<<< HEAD
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -143,6 +144,27 @@ importers:
       intl-messageformat:
         specifier: 10.7.18
         version: 10.7.18
+||||||| b76fddd
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.2
+=======
+      '@types/jsonwebtoken':
+        specifier: ^9.0.10
+        version: 9.0.10
+      clsx:
+        specifier: 2.1.1
+        version: 2.1.1
+      framer-motion:
+        specifier: 12.23.24
+        version: 12.23.24(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      intl-messageformat:
+        specifier: 10.7.18
+        version: 10.7.18
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.2
+>>>>>>> dev
       next:
         specifier: 16.0.0
         version: 16.0.0(@babel/core@7.28.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
