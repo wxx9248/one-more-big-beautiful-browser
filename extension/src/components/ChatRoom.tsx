@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
 import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
-import { ArrowUp, Loader2 } from "lucide-react";
+import { ArrowUp, Loader2, Wrench } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
+import { streamGraph } from "@/src/lib/langgraph";
 
 interface Message {
   id: string;
@@ -12,6 +13,8 @@ interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
+  isToolCall?: boolean;
+  toolName?: string;
 }
 
 interface ChatRoomProps {
@@ -109,101 +112,55 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     userMessage: string,
     assistantMessageId: string,
   ) => {
-    // Cancel previous request if exists
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    // Create new abort controller
-    abortControllerRef.current = new AbortController();
-
     try {
-      const response = await fetch("http://localhost:3001/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authState.token}`,
-        },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: userMessage }],
-          model: "anthropic:claude-sonnet-4-5",
-          temperature: 0.7,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
+      console.log("[ChatRoom] Starting LangGraph stream for:", userMessage);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error?.message || `Request failed: ${response.status}`,
-        );
-      }
+      // Stream from LangGraph
+      for await (const chunk of streamGraph(userMessage)) {
+        console.log("[ChatRoom] Received chunk:", chunk);
 
-      if (!response.body) {
-        throw new Error("No response body");
-      }
+        if (chunk.type === "llm") {
+          // LLM response - update assistant message
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: chunk.content, isStreaming: true }
+                : msg,
+            ),
+          );
+        } else if (chunk.type === "tools") {
+          // Tool execution - show indicator
+          try {
+            const toolData = JSON.parse(chunk.content);
+            const toolName = toolData.messages?.[0]?.name || "unknown_tool";
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullResponse = "";
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6).trim();
-
-              if (data === "[DONE]") {
-                // Mark streaming as complete
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, isStreaming: false }
-                      : msg,
-                  ),
-                );
-                return;
-              }
-
-              if (data) {
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.token) {
-                    fullResponse += parsed.token;
-                    setMessages((prev) =>
-                      prev.map((msg) =>
-                        msg.id === assistantMessageId
-                          ? { ...msg, content: fullResponse }
-                          : msg,
-                      ),
-                    );
-                  } else if (parsed.error) {
-                    throw new Error(parsed.error);
-                  }
-                } catch (parseError) {
-                  console.warn("Failed to parse SSE data:", data, parseError);
-                }
-              }
-            }
+            // Add tool execution message
+            const toolMessageId = `${Date.now()}-tool`;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: toolMessageId,
+                sender: "System",
+                content: `Using browser tool: ${toolName}`,
+                timestamp: new Date(),
+                isToolCall: true,
+                toolName,
+              },
+            ]);
+          } catch (e) {
+            console.warn("Failed to parse tool data:", chunk.content);
           }
         }
-      } finally {
-        reader.releaseLock();
       }
+
+      // Mark streaming as complete
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId ? { ...msg, isStreaming: false } : msg,
+        ),
+      );
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        console.log("Request aborted");
-        return;
-      }
+      console.error("[ChatRoom] LangGraph stream error:", error);
       throw error;
     }
   };
@@ -254,12 +211,17 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
             className={`max-w-[80%] ${
               message.sender === "You"
                 ? "ml-auto bg-primary text-primary-foreground"
-                : "mr-auto"
+                : message.isToolCall
+                  ? "mx-auto bg-blue-50 border-blue-200"
+                  : "mr-auto"
             }`}
           >
             <div className="p-3 space-y-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold">{message.sender}</span>
+                <span className="text-xs font-semibold flex items-center gap-1">
+                  {message.isToolCall && <Wrench className="w-3 h-3" />}
+                  {message.sender}
+                </span>
                 <span className="text-xs opacity-70">
                   {message.timestamp.toLocaleTimeString()}
                 </span>

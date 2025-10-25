@@ -134,9 +134,6 @@ importers:
       '@react-aria/visually-hidden':
         specifier: 3.8.28
         version: 3.8.28(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      '@types/jsonwebtoken':
-        specifier: ^9.0.10
-        version: 9.0.10
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -174,6 +171,9 @@ importers:
       '@tailwindcss/postcss':
         specifier: 4.1.16
         version: 4.1.16
+      '@types/jsonwebtoken':
+        specifier: ^9.0.10
+        version: 9.0.10
       '@types/node':
         specifier: 24.9.1
         version: 24.9.1
