@@ -49,7 +49,7 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     setInputValue("");
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -59,8 +59,11 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
   return (
     <div className="fixed top-0 left-0 h-screen w-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="border-b p-4">
+      <div className="border-b p-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Chat Room</h1>
+        <Button variant="outline" size="sm" onClick={onLogout}>
+          Log Out
+        </Button>
       </div>
 
       {/* Messages Area */}
@@ -92,11 +95,17 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
       <div className="pb-2 px-2">
         <div className="flex rounded-md border min-h-10 flex-col">
           <Textarea
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyPress}
             placeholder="Type a message..."
             className="rounded-none mt-2 resize-none text-sm px-2 py-1 focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 border-0 shadow-none min-h-10 h-auto"
           />
           <div className="flex gap-2 px-1.5 pb-1.5 items-center justify-end">
-            <Button className="rounded-full h-6 w-6 flex items-center justify-center cursor-pointer">
+            <Button
+              onClick={handleSendMessage}
+              className="rounded-full h-6 w-6 flex items-center justify-center cursor-pointer"
+            >
               <ArrowUp className="size-4" />
             </Button>
           </div>
