@@ -1,5 +1,6 @@
 import { LogoutButton } from "@/components/logout-button";
 import { getAuthToken } from "@/lib/auth-helpers";
+import ChatComponent from "@/components/ChatComponent";
 
 export default async function DashboardPage() {
   const token = await getAuthToken();
@@ -63,6 +64,7 @@ export default async function DashboardPage() {
               </p>
               <LogoutButton />
             </div>
+            <ChatComponent />
           </div>
         </div>
       </div>
