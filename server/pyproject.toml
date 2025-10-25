@@ -9,3 +9,8 @@ dependencies = [
     "fastapi>=0.120.0",
     "uvicorn>=0.38.0",
 ]
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+]
