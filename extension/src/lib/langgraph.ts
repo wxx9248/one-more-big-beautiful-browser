@@ -14,9 +14,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { browserTools } from "./browser-tools";
 import { getAuthToken } from "./tool-messenger";
-
-// Backend API configuration
-const BACKEND_API_URL = "http://localhost:3001/api/chat";
+import { BACKEND_API_URL } from "@/src/config/env";
 
 /**
  * LLM Node - Calls backend API for LLM inference
