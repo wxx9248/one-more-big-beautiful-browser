@@ -2,7 +2,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import jwt from "jsonwebtoken";
-import { getFirestoreDb } from "@/lib/firebase-admin";
+import {
+  getFirestoreDb,
+  getFirestoreFieldValue,
+  getAdminAuth,
+} from "@/lib/firebase-admin";
 
 // Ensure this route runs in the Node.js runtime (not Edge),
 // because firebase-admin is not supported in Edge runtime
@@ -50,30 +54,44 @@ export async function POST(request: NextRequest) {
       stream,
     });
 
-    // Optionally capture auth user info from Authorization header (JWT)
-    let user: { id?: string; username?: string; email?: string } | undefined;
-    try {
-      const authHeader = request.headers.get("authorization");
-      const token = authHeader?.startsWith("Bearer ")
-        ? authHeader.slice(7)
-        : undefined;
-      const secret =
-        process.env.JWT_SECRET ||
-        "your-super-secret-jwt-key-change-this-in-production";
-      if (token && secret) {
-        const decoded: any = jwt.verify(token, secret);
-        user = {
-          id: decoded?.id,
-          username: decoded?.username,
-          email: decoded?.email,
-        };
+    // Optionally capture auth user info from Authorization header
+    // Prefer verifying Firebase ID tokens via Admin SDK; fall back to decode.
+    let user:
+      | { id?: string; username?: string; email?: string; uid?: string }
+      | undefined;
+    const authHeader = request.headers.get("authorization");
+    const bearer = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : undefined;
+    if (bearer) {
+      let verified = false;
+      try {
+        const adminAuth = await getAdminAuth();
+        if (adminAuth) {
+          const decoded = await (adminAuth as any).verifyIdToken(bearer);
+          user = { id: decoded?.uid, uid: decoded?.uid, email: decoded?.email };
+          verified = true;
+        }
+      } catch (e) {
+        console.warn("Firebase ID token verification failed", e);
       }
-    } catch (e) {
-      console.warn("JWT verification failed or missing", e);
+
+      if (!verified) {
+        try {
+          // As a fallback, attempt decode without verification to extract claims
+          const decoded: any = jwt.decode(bearer);
+          if (decoded) {
+            user = { id: decoded?.uid || decoded?.id, email: decoded?.email };
+          }
+        } catch (e) {
+          console.warn("JWT decode failed", e);
+        }
+      }
     }
 
     // Firestore: persist conversation start and request context if configured
     const db = await getFirestoreDb();
+    const FieldValue = await getFirestoreFieldValue();
     const convId: string =
       (conversation && conversation.id) ||
       `conv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -82,25 +100,138 @@ export async function POST(request: NextRequest) {
     if (db) {
       try {
         const convRef = (db as any).collection("conversations").doc(convId);
-        await convRef.set(
-          {
-            id: convId,
-            user: user || null,
-            startedAt,
-            createdAt: Date.now(),
-            model,
-            temperature,
-            toolCount: Array.isArray(tools) ? tools.length : 0,
-            status: "streaming",
-            messages: Array.isArray(conversation_messages)
-              ? conversation_messages
-              : [],
-            messageCount: Array.isArray(messages) ? messages.length : 0,
-          },
-          { merge: true }
-        );
+        const existing = await convRef.get();
+        if (!existing.exists) {
+          await convRef.set(
+            {
+              conversation_id: convId,
+              user_id: user?.id || (user as any)?.uid || null,
+              started_at: FieldValue?.serverTimestamp?.() || new Date(),
+              status: "active",
+              model,
+              temperature,
+              toolCount: Array.isArray(tools) ? tools.length : 0,
+              createdAt: Date.now(),
+              user_saved_count: 0,
+            },
+            { merge: true }
+          );
+        } else {
+          await convRef.set(
+            {
+              model,
+              temperature,
+              toolCount: Array.isArray(tools) ? tools.length : 0,
+            },
+            { merge: true }
+          );
+        }
+
+        // Persist all new user-typed messages since last saved
+        const alreadySaved: number = existing.exists
+          ? Number(existing.data()?.user_saved_count || 0)
+          : 0;
+        const userMsgs: Array<{ role: string; content: string }> =
+          Array.isArray(conversation_messages) ? conversation_messages : [];
+        const newMsgs = userMsgs
+          .slice(alreadySaved)
+          .filter(
+            (m) =>
+              m && typeof m.content === "string" && m.content.trim().length > 0
+          );
+
+        if (newMsgs.length > 0) {
+          const coll = (db as any)
+            .collection("conversations")
+            .doc(convId)
+            .collection("messages");
+          for (const m of newMsgs) {
+            await coll.add({
+              conversation_id: convId,
+              sender: "user",
+              content: m.content,
+              created_at: FieldValue?.serverTimestamp?.() || new Date(),
+            });
+          }
+          await convRef.set(
+            { user_saved_count: alreadySaved + newMsgs.length },
+            { merge: true }
+          );
+        }
       } catch (e) {
         console.warn("Failed to persist conversation start to Firestore:", e);
+      }
+    } else {
+      // Fallback: use Firebase client SDK if Admin SDK is not configured
+      try {
+        const { db: clientDb } = await import("@/lib/firebase/config");
+        const firestore = await import("firebase/firestore");
+        const convRef = firestore.doc(clientDb as any, "conversations", convId);
+        const existing = await firestore.getDoc(convRef);
+        if (!existing.exists()) {
+          await firestore.setDoc(
+            convRef,
+            {
+              conversation_id: convId,
+              user_id: user?.id || (user as any)?.uid || null,
+              started_at: firestore.serverTimestamp(),
+              status: "active",
+              model,
+              temperature,
+              toolCount: Array.isArray(tools) ? tools.length : 0,
+              user_saved_count: 0,
+            },
+            { merge: true }
+          );
+        } else {
+          await firestore.setDoc(
+            convRef,
+            {
+              model,
+              temperature,
+              toolCount: Array.isArray(tools) ? tools.length : 0,
+            },
+            { merge: true }
+          );
+        }
+
+        const alreadySaved: number = existing.exists()
+          ? Number((existing.data() as any)?.user_saved_count || 0)
+          : 0;
+        const userMsgs: Array<{ role: string; content: string }> =
+          Array.isArray(conversation_messages) ? conversation_messages : [];
+        const newMsgs = userMsgs
+          .slice(alreadySaved)
+          .filter(
+            (m) =>
+              m && typeof m.content === "string" && m.content.trim().length > 0
+          );
+
+        if (newMsgs.length > 0) {
+          for (const m of newMsgs) {
+            await firestore.addDoc(
+              firestore.collection(
+                clientDb as any,
+                "conversations",
+                convId,
+                "messages"
+              ),
+              {
+                conversation_id: convId,
+                sender: "user",
+                content: m.content,
+                created_at: firestore.serverTimestamp(),
+              }
+            );
+          }
+          await firestore.setDoc(
+            convRef,
+            { user_saved_count: alreadySaved + newMsgs.length },
+            { merge: true }
+          );
+        }
+      } catch (e) {
+        console.warn("Client Firestore fallback failed to persist start:", e);
       }
     }
 
@@ -150,15 +281,70 @@ export async function POST(request: NextRequest) {
                 .doc(convId);
               await convRef.set(
                 {
-                  status: "completed",
-                  endedAt: Date.now(),
-                  assistantText,
+                  status: "closed",
+                  ended_at:
+                    (FieldValue as any)?.serverTimestamp?.() || new Date(),
                 },
                 { merge: true }
               );
+
+              // Save assistant message as a new entry in messages subcollection
+              if (assistantText && assistantText.trim().length > 0) {
+                await (db as any)
+                  .collection("conversations")
+                  .doc(convId)
+                  .collection("messages")
+                  .add({
+                    conversation_id: convId,
+                    sender: "assistant",
+                    content: assistantText,
+                    created_at: FieldValue?.serverTimestamp?.() || new Date(),
+                  });
+              }
             } catch (e) {
               console.warn(
                 "Failed to update conversation completion in Firestore:",
+                e
+              );
+            }
+          } else {
+            // Fallback using client SDK
+            try {
+              const { db: clientDb } = await import("@/lib/firebase/config");
+              const firestore = await import("firebase/firestore");
+              const convRef = firestore.doc(
+                clientDb as any,
+                "conversations",
+                convId
+              );
+              await firestore.setDoc(
+                convRef,
+                {
+                  status: "closed",
+                  ended_at: firestore.serverTimestamp(),
+                },
+                { merge: true }
+              );
+
+              if (assistantText && assistantText.trim().length > 0) {
+                await firestore.addDoc(
+                  firestore.collection(
+                    clientDb as any,
+                    "conversations",
+                    convId,
+                    "messages"
+                  ),
+                  {
+                    conversation_id: convId,
+                    sender: "assistant",
+                    content: assistantText,
+                    created_at: firestore.serverTimestamp(),
+                  }
+                );
+              }
+            } catch (e) {
+              console.warn(
+                "Client Firestore fallback failed to persist end:",
                 e
               );
             }
@@ -181,7 +367,27 @@ export async function POST(request: NextRequest) {
               await convRef.set(
                 {
                   status: "error",
-                  endedAt: Date.now(),
+                  ended_at:
+                    (FieldValue as any)?.serverTimestamp?.() || new Date(),
+                  error: error instanceof Error ? error.message : String(error),
+                },
+                { merge: true }
+              );
+            } catch {}
+          } else {
+            try {
+              const { db: clientDb } = await import("@/lib/firebase/config");
+              const firestore = await import("firebase/firestore");
+              const convRef = firestore.doc(
+                clientDb as any,
+                "conversations",
+                convId
+              );
+              await firestore.setDoc(
+                convRef,
+                {
+                  status: "error",
+                  ended_at: firestore.serverTimestamp(),
                   error: error instanceof Error ? error.message : String(error),
                 },
                 { merge: true }
