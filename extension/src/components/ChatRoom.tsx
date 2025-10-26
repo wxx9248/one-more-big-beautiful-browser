@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
-import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
 import { ArrowUp, Loader2, PlusIcon, SettingsIcon } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
@@ -14,8 +13,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
 import { cn } from "../lib/utils";
@@ -371,6 +368,7 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 return (
                   <div key={message.id} className="my-1">
                     <button
+                      type="button"
                       onClick={() => {
                         setMessages((prev) =>
                           prev.map((msg) =>
@@ -397,7 +395,7 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 // System messages with images
                 return (
                   <div key={message.id} className="flex justify-start">
-                    <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none opacity-50">
+                    <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none">
                       <p>{message.content}</p>
                       <img
                         src={message.imageUrl}
