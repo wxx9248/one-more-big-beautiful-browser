@@ -2,10 +2,19 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
 import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
-import { ArrowUp, Loader2, Wrench } from "lucide-react";
+import { ArrowUp, Loader2, PlusIcon, SettingsIcon, Wrench } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
 import { streamGraph } from "@/src/lib/langgraph";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/src/components/ui/dropdown-menu";
 
 interface Message {
   id: string;
@@ -22,14 +31,7 @@ interface ChatRoomProps {
 }
 
 export function ChatRoom({ onLogout }: ChatRoomProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      sender: "System",
-      content: "Welcome to the chat room!",
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -266,16 +268,36 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
   return (
     <div className="fixed top-0 left-0 h-screen w-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="border-b p-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Chat Room</h1>
-          {authState.isAuthenticated && (
-            <p className="text-xs text-green-600">Authenticated</p>
-          )}
+      <div className="h-8 p-1 px-2 flex items-center justify-start">
+        <div className="flex-1" />
+        <div className="flex items-center gap-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="cursor-pointer hover:bg-muted rounded-sm h-6 w-6"
+          >
+            <PlusIcon className="size-4 stroke-[1.5]" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="cursor-pointer hover:bg-muted rounded-sm h-6 w-6"
+              >
+                <SettingsIcon className="size-4 stroke-[1.5]" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="mx-2 p-1 px-1 min-w-36">
+              <DropdownMenuItem className="text-xs">Settings</DropdownMenuItem>
+              <DropdownMenuItem className="text-xs" onClick={onLogout}>
+                <span className="text-destructive-foreground hover:text-destructive">
+                  Logout
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <Button variant="outline" size="sm" onClick={onLogout}>
-          Log Out
-        </Button>
       </div>
 
       {/* Error Display */}

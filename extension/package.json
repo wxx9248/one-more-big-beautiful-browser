@@ -17,6 +17,9 @@
   "dependencies": {
     "@langchain/core": "^1.0.1",
     "@langchain/langgraph": "^1.0.1",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-menubar": "^1.1.16",
+    "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-slot": "^1.2.3",
     "@tailwindcss/vite": "^4.1.16",
     "class-variance-authority": "^0.7.1",
