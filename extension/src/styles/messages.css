@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@import "./global.css";
+
+.ai-message {
+  ul {
+    @apply ml-2 list-disc;
+  }
+  li {
+    @apply ml-2;
+  }
+  ol {
+    list-style-type: decimal;
+    @apply ml-2;
+  }
+  a {
+    @apply hover:underline text-primary;
+  }
+
+  @apply leading-5 space-y-1;
+}
