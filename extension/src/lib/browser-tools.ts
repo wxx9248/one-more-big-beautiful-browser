@@ -243,7 +243,7 @@ export const switchToTabTool = new DynamicStructuredTool({
   description:
     "Switch to a different browser tab by its ID. Use getAllTabs first to find the tab ID you want to switch to.",
   schema: z.object({
-    tabId: z.number().describe("The ID of the tab to switch to"),
+    tabId: z.coerce.number().describe("The ID of the tab to switch to"),
   }),
   func: async ({ tabId }): Promise<string> => {
     const response = await sendToolMessage<{
