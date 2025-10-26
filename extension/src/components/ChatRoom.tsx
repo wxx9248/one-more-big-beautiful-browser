@@ -112,7 +112,10 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     userMessage: string,
     assistantMessageId: string,
   ) => {
-    let followupMessageId: string | null = null;
+    let currentFollowupMessageId: string | null = null;
+    const followupMessageIds: string[] = [];
+    let lastContentLength = 0;
+    let expectingNewFollowup = false;
 
     try {
       console.log("[ChatRoom] Starting LangGraph stream for:", userMessage);
@@ -130,14 +133,47 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 : msg,
             ),
           );
+        } else if (chunk.type === "tool_result") {
+          // Tool just completed - next llm_followup will be a new message
+          expectingNewFollowup = true;
+          lastContentLength = 0;
+
+          // Also handle the tool result display
+          try {
+            const resultData = JSON.parse(chunk.content);
+            console.log(
+              `[ChatRoom] Tool ${resultData.name} result:`,
+              resultData.result,
+            );
+          } catch (e) {
+            console.warn("Failed to parse tool result:", chunk.content);
+          }
         } else if (chunk.type === "llm_followup") {
-          // Follow-up response after tool execution - create new message
-          if (!followupMessageId) {
-            followupMessageId = `${Date.now()}-followup`;
+          // Follow-up response after tool execution
+          const isNewFollowup =
+            expectingNewFollowup || chunk.content.length < lastContentLength;
+
+          if (isNewFollowup && expectingNewFollowup) {
+            // Mark previous follow-up as complete
+            if (currentFollowupMessageId) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === currentFollowupMessageId
+                    ? { ...msg, isStreaming: false }
+                    : msg,
+                ),
+              );
+            }
+
+            // Create new follow-up message
+            currentFollowupMessageId = `${Date.now()}-followup-${followupMessageIds.length}`;
+            followupMessageIds.push(currentFollowupMessageId);
+            expectingNewFollowup = false;
+
             setMessages((prev) => [
               ...prev,
               {
-                id: followupMessageId!,
+                id: currentFollowupMessageId!,
                 sender: "Assistant",
                 content: chunk.content,
                 timestamp: new Date(),
@@ -148,12 +184,14 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
             // Update existing follow-up message
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === followupMessageId
+                msg.id === currentFollowupMessageId
                   ? { ...msg, content: chunk.content, isStreaming: true }
                   : msg,
               ),
             );
           }
+
+          lastContentLength = chunk.content.length;
         } else if (chunk.type === "tool_call") {
           // Tool execution started
           try {
@@ -176,17 +214,6 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
           } catch (e) {
             console.warn("Failed to parse tool data:", chunk.content);
           }
-        } else if (chunk.type === "tool_result") {
-          // Tool execution completed
-          try {
-            const resultData = JSON.parse(chunk.content);
-            console.log(
-              `[ChatRoom] Tool ${resultData.name} result:`,
-              resultData.result,
-            );
-          } catch (e) {
-            console.warn("Failed to parse tool result:", chunk.content);
-          }
         } else if (chunk.type === "tool_error") {
           // Tool execution failed
           try {
@@ -206,10 +233,10 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
         }
       }
 
-      // Mark streaming as complete for both original and follow-up messages
+      // Mark streaming as complete for original and all follow-up messages
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === assistantMessageId || msg.id === followupMessageId
+          msg.id === assistantMessageId || followupMessageIds.includes(msg.id)
             ? { ...msg, isStreaming: false }
             : msg,
         ),

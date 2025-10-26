@@ -258,6 +258,140 @@ export async function invokeGraph(userMessage: string): Promise<string> {
 }
 
 /**
+ * Helper to stream next response in recursive tool calling
+ */
+async function* streamNextResponse(
+  messages: any[],
+  toolName: string,
+  toolResult: string,
+): AsyncGenerator<{ type: string; content: string }, void, unknown> {
+  const token = await getAuthToken();
+  if (!token) {
+    throw new Error("No auth token available");
+  }
+
+  console.log("[streamNextResponse] Sending request with conversation history");
+
+  const response = await fetch(BACKEND_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ messages }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend API error: ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let fullText = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n");
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6).trim();
+
+          if (data === "[DONE]") {
+            yield {
+              type: "llm_followup",
+              content: fullText,
+            };
+
+            // Check for more tool calls recursively
+            const nextToolCalls = parseToolCalls(fullText);
+            if (nextToolCalls.length > 0) {
+              for (const toolCall of nextToolCalls) {
+                console.log(
+                  `[streamNextResponse] Executing tool: ${toolCall.name}`,
+                );
+
+                yield {
+                  type: "tool_call",
+                  content: JSON.stringify({
+                    name: toolCall.name,
+                    args: toolCall.args,
+                  }),
+                };
+
+                const tool = browserTools.find((t) => t.name === toolCall.name);
+                if (tool) {
+                  try {
+                    const result = await tool.func(toolCall.args as any);
+                    yield {
+                      type: "tool_result",
+                      content: JSON.stringify({
+                        name: toolCall.name,
+                        result: result,
+                      }),
+                    };
+
+                    const updatedMessages = [
+                      ...messages,
+                      { role: "assistant", content: fullText },
+                      {
+                        role: "user",
+                        content: `The tool "${toolCall.name}" returned:\n\n${result}\n\nBased on this, provide a response or call another tool if needed.`,
+                      },
+                    ];
+
+                    yield* streamNextResponse(
+                      updatedMessages,
+                      toolCall.name,
+                      result,
+                    );
+                  } catch (error: any) {
+                    yield {
+                      type: "tool_error",
+                      content: JSON.stringify({
+                        name: toolCall.name,
+                        error: error.message,
+                      }),
+                    };
+                  }
+                }
+              }
+            }
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.token) {
+              fullText += parsed.token;
+              yield {
+                type: "llm_followup",
+                content: fullText,
+              };
+            }
+          } catch (e) {
+            console.warn(
+              "[streamNextResponse] Failed to parse SSE line:",
+              data,
+            );
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
  * Stream follow-up LLM response after tool execution
  */
 async function* streamWithToolResults(
@@ -280,7 +414,7 @@ async function* streamWithToolResults(
     { role: "assistant", content: assistantResponse },
     {
       role: "user",
-      content: `The tool "${toolName}" returned the following result:\n\n${toolResult}\n\nPlease provide a natural, helpful response based on this information.`,
+      content: `The tool "${toolName}" returned the following result:\n\n${toolResult}\n\nBased on this information, either provide a natural response to the user, or if you need more information, you can call another tool.`,
     },
   ];
 
@@ -347,6 +481,88 @@ async function* streamWithToolResults(
               type: "llm_followup",
               content: fullText,
             };
+
+            // Check if the follow-up response contains more tool calls
+            const followupToolCalls = parseToolCalls(fullText);
+            console.log(
+              `[streamWithToolResults] Parsed ${followupToolCalls.length} tool calls from follow-up`,
+            );
+
+            if (followupToolCalls.length > 0) {
+              // Recursively execute tool calls
+              for (const toolCall of followupToolCalls) {
+                console.log(
+                  `[streamWithToolResults] Executing follow-up tool: ${toolCall.name}`,
+                  toolCall.args,
+                );
+
+                yield {
+                  type: "tool_call",
+                  content: JSON.stringify({
+                    name: toolCall.name,
+                    args: toolCall.args,
+                  }),
+                };
+
+                const tool = browserTools.find((t) => t.name === toolCall.name);
+                if (tool) {
+                  try {
+                    const nextToolResult = await tool.func(
+                      toolCall.args as any,
+                    );
+                    console.log(
+                      `[streamWithToolResults] Follow-up tool ${toolCall.name} result:`,
+                      nextToolResult,
+                    );
+
+                    yield {
+                      type: "tool_result",
+                      content: JSON.stringify({
+                        name: toolCall.name,
+                        result: nextToolResult,
+                      }),
+                    };
+
+                    // Build updated conversation history
+                    const updatedMessages = [
+                      ...messages,
+                      { role: "assistant", content: fullText },
+                      {
+                        role: "user",
+                        content: `The tool "${toolCall.name}" returned the following result:\n\n${nextToolResult}\n\nBased on this information, either provide a natural response to the user, or if you need more information, you can call another tool.`,
+                      },
+                    ];
+
+                    // Recursively stream the next response
+                    console.log(
+                      `[streamWithToolResults] Recursively streaming next response...`,
+                    );
+                    yield* streamNextResponse(
+                      updatedMessages,
+                      toolCall.name,
+                      nextToolResult,
+                    );
+                  } catch (error: any) {
+                    console.error(
+                      `[streamWithToolResults] Follow-up tool ${toolCall.name} error:`,
+                      error,
+                    );
+                    yield {
+                      type: "tool_error",
+                      content: JSON.stringify({
+                        name: toolCall.name,
+                        error: error.message,
+                      }),
+                    };
+                  }
+                } else {
+                  console.warn(
+                    `[streamWithToolResults] Tool not found: ${toolCall.name}`,
+                  );
+                }
+              }
+            }
+
             return;
           }
 
