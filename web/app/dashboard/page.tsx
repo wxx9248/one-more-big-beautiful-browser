@@ -1,25 +1,56 @@
-"use client";
-
 import { Card, CardHeader, CardBody, CardFooter } from "@heroui/card";
 import { Chip } from "@heroui/chip";
 import { Code } from "@heroui/code";
 import { Divider } from "@heroui/divider";
 import { Button } from "@heroui/button";
-import { useEffect, useState } from "react";
 import { logoutAction } from "@/controller/auth-actions";
+import { getAuthToken, isAuthenticated } from "@/lib/auth-helpers";
+import { redirect } from "next/navigation";
+import jwt from "jsonwebtoken";
 
-export default function DashboardPage() {
-  const [token, setToken] = useState<string | null>(null);
+interface DecodedToken {
+  user_id?: string;
+  email?: string;
+  name?: string;
+  // Firebase token fields
+  uid?: string;
+  email_verified?: boolean;
+  // Custom token fields
+  id?: string;
+  username?: string;
+  iat?: number;
+  exp?: number;
+}
 
-  useEffect(() => {
-    // Get token from cookies on client side
-    const cookies = document.cookie.split(";");
-    const authCookie = cookies.find((c) => c.trim().startsWith("auth-token="));
-    if (authCookie) {
-      const tokenValue = authCookie.split("=")[1];
-      setToken(tokenValue);
+export default async function DashboardPage() {
+  // Check authentication on server side
+  const authenticated = await isAuthenticated();
+
+  if (!authenticated) {
+    redirect("/login");
+  }
+
+  // Get and decode the token
+  const token = await getAuthToken();
+  let decodedToken: DecodedToken | null = null;
+  let tokenPreview = "";
+
+  if (token) {
+    try {
+      // Decode token without verification (Firebase tokens are verified by Firebase)
+      // For production, you should verify Firebase tokens using Firebase Admin SDK
+      decodedToken = jwt.decode(token) as DecodedToken;
+      tokenPreview = token.substring(0, 40);
+
+      if (!decodedToken) {
+        // Token is invalid, redirect to login
+        redirect("/login");
+      }
+    } catch (error) {
+      // Token is invalid, redirect to login
+      redirect("/login");
     }
-  }, []);
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center">
@@ -29,7 +60,12 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-2 items-start">
               <h1 className="text-3xl font-bold">Dashboard</h1>
               <p className="text-default-500">
-                Welcome! You are now logged in.
+                Welcome back,{" "}
+                {decodedToken?.name ||
+                  decodedToken?.username ||
+                  decodedToken?.email ||
+                  "User"}
+                !
               </p>
             </div>
           </CardHeader>
@@ -62,7 +98,7 @@ export default function DashboardPage() {
               <Divider />
 
               {/* Token Status */}
-              {token && (
+              {decodedToken && (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold">Token Status</h3>
@@ -70,7 +106,21 @@ export default function DashboardPage() {
                       Active
                     </Chip>
                   </div>
-                  <Code>JWT: {token.substring(0, 40)}...</Code>
+                  <div className="space-y-2">
+                    <Code className="block">
+                      User ID: {decodedToken.uid || decodedToken.id || "N/A"}
+                    </Code>
+                    <Code className="block">
+                      Email: {decodedToken.email || "N/A"}
+                    </Code>
+                    {decodedToken.email_verified !== undefined && (
+                      <Code className="block">
+                        Email Verified:{" "}
+                        {decodedToken.email_verified ? "Yes" : "No"}
+                      </Code>
+                    )}
+                    <Code className="block">JWT: {tokenPreview}...</Code>
+                  </div>
                   <p className="text-default-400">
                     Your session token is stored securely and will be used for
                     authenticated requests

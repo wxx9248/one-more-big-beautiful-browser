@@ -54,6 +54,7 @@
     "@react-aria/ssr": "3.9.10",
     "@react-aria/visually-hidden": "3.8.28",
     "clsx": "2.1.1",
+    "firebase": "^12.4.0",
     "framer-motion": "12.23.24",
     "intl-messageformat": "10.7.18",
     "jsonwebtoken": "^9.0.2",
