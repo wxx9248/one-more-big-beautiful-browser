@@ -10,6 +10,7 @@
     "lint": "eslint --fix"
   },
   "dependencies": {
+    "firebase-admin": "^12.6.0",
     "@anthropic-ai/sdk": "^0.67.0",
     "@heroui/accordion": "2.2.24",
     "@heroui/alert": "2.2.27",

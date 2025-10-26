@@ -15,6 +15,7 @@ import { browserTools } from "./browser-tools";
 import { getAuthToken } from "./tool-messenger";
 import { BACKEND_API_URL } from "@/src/config/env";
 import type { StructuredToolInterface } from "@langchain/core/tools";
+import { getCurrentConversation } from "@/src/lib/conversation";
 
 /**
  * Convert LangChain tools to Anthropic tool format
@@ -200,6 +201,26 @@ function convertToAnthropicMessages(
 }
 
 /**
+ * Create a simplified transcript suitable for backend logging/analytics
+ */
+function serializeConversationMessages(
+  messages: BaseMessage[],
+): Array<{ role: string; content: string }> {
+  // Only include messages typed by the user (exclude assistant/tool calls)
+  const out: Array<{ role: string; content: string }> = [];
+  for (const msg of messages) {
+    if (msg instanceof HumanMessage) {
+      out.push({
+        role: "user",
+        content:
+          typeof msg.content === "string" ? msg.content : String(msg.content),
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * LLM Node - Calls web API with streaming and emits tokens via config.writer
  */
 async function llmNode(
@@ -217,6 +238,9 @@ async function llmNode(
 
     // Convert messages to Anthropic format
     const anthropicMessages = convertToAnthropicMessages(messages);
+    // Build simplified transcript + conversation info for backend context
+    const conversation = getCurrentConversation();
+    const simplifiedTranscript = serializeConversationMessages(messages);
 
     console.log("[LangGraph] Calling Anthropic streaming API via web proxy");
     console.log("[LangGraph] Message count:", anthropicMessages.length);
@@ -232,6 +256,11 @@ async function llmNode(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
+        // Minimal conversation context for backend tracking
+        conversation,
+        conversation_messages: simplifiedTranscript,
+
+        // Anthropic request payload (still required for the LLM call)
         messages: anthropicMessages,
         model: "claude-sonnet-4-5",
         max_tokens: 4096,

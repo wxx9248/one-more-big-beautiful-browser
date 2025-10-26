@@ -5,6 +5,10 @@ import { ArrowUp, Loader2, PlusIcon, SettingsIcon } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
 import { streamChat } from "@/src/lib/langgraph";
+import {
+  getCurrentConversation,
+  endCurrentConversation,
+} from "@/src/lib/conversation";
 
 import "@/src/styles/messages.css";
 import { marked } from "marked";
@@ -45,6 +49,8 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    // Ensure a conversation is started for this side panel session
+    getCurrentConversation();
     loadAuthState();
   }, []);
 
@@ -284,6 +290,8 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      // End the conversation when side panel closes/unmounts
+      endCurrentConversation();
     };
   }, []);
 
