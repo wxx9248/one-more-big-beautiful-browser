@@ -2,13 +2,13 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
 import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
-import { ArrowUp, Loader2, PlusIcon, SettingsIcon, Wrench } from "lucide-react";
+import { ArrowUp, Loader2, PlusIcon, SettingsIcon } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
-import { streamGraph } from "@/src/lib/langgraph";
-import { marked } from "marked";
+import { streamChat } from "@/src/lib/langgraph";
 
 import "@/src/styles/messages.css";
+import { marked } from "marked";
 
 import {
   DropdownMenu,
@@ -26,8 +26,9 @@ interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
-  isToolCall?: boolean;
-  toolName?: string;
+  isCollapsible?: boolean;
+  isExpanded?: boolean;
+  imageUrl?: string; // For displaying screenshots
 }
 
 interface ChatRoomProps {
@@ -118,20 +119,33 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     userMessage: string,
     assistantMessageId: string,
   ) => {
-    let currentFollowupMessageId: string | null = null;
-    const followupMessageIds: string[] = [];
-    let lastContentLength = 0;
-    let expectingNewFollowup = false;
-
     try {
-      console.log("[ChatRoom] Starting LangGraph stream for:", userMessage);
+      // Build message history for LangGraph
+      const { HumanMessage, AIMessage } = await import(
+        "@langchain/core/messages"
+      );
 
-      // Stream from LangGraph
-      for await (const chunk of streamGraph(userMessage)) {
-        console.log("[ChatRoom] Received chunk:", chunk);
+      // Convert message history to LangChain format
+      const messageHistory = messages
+        .filter((msg) => msg.sender !== "System") // Exclude system messages
+        .map((msg) => {
+          if (msg.sender === "You") {
+            return new HumanMessage(msg.content);
+          } else {
+            return new AIMessage(msg.content);
+          }
+        });
 
-        if (chunk.type === "llm") {
-          // Initial LLM response - update assistant message
+      // Add current user message
+      messageHistory.push(new HumanMessage(userMessage));
+
+      // Use streamChat for token-level streaming with LangGraph
+      const stream = streamChat(messageHistory);
+      let currentToolMessageId: string | null = null;
+
+      for await (const chunk of stream) {
+        if (chunk.type === "token") {
+          // Real-time token streaming from first LLM call
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId
@@ -139,116 +153,123 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 : msg,
             ),
           );
-        } else if (chunk.type === "tool_result") {
-          // Tool just completed - next llm_followup will be a new message
-          expectingNewFollowup = true;
-          lastContentLength = 0;
+        } else if (chunk.type === "intermediate_text") {
+          // Intermediate LLM output - create collapsible system message
+          const intermediateId = (Date.now() + Math.random()).toString();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: intermediateId,
+              sender: "System",
+              content: chunk.content,
+              timestamp: new Date(),
+              isCollapsible: true,
+              isExpanded: false,
+            },
+          ]);
+        } else if (chunk.type === "final_text") {
+          // Final LLM output after tools - create new assistant message
+          const finalMessageId = (Date.now() + Math.random()).toString();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: finalMessageId,
+              sender: "Assistant",
+              content: chunk.content,
+              timestamp: new Date(),
+              isStreaming: false,
+            },
+          ]);
+        } else if (chunk.type === "tool_start") {
+          // Tool execution starting - create a new message for tool status
+          const toolMessageId = (Date.now() + Math.random()).toString();
+          currentToolMessageId = toolMessageId;
 
-          // Also handle the tool result display
-          try {
-            const resultData = JSON.parse(chunk.content);
-            console.log(
-              `[ChatRoom] Tool ${resultData.name} result:`,
-              resultData.result,
-            );
-          } catch (e) {
-            console.warn("Failed to parse tool result:", chunk.content);
-          }
-        } else if (chunk.type === "llm_followup") {
-          // Follow-up response after tool execution
-          const isNewFollowup =
-            expectingNewFollowup || chunk.content.length < lastContentLength;
-
-          if (isNewFollowup && expectingNewFollowup) {
-            // Mark previous follow-up as complete
-            if (currentFollowupMessageId) {
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === currentFollowupMessageId
-                    ? { ...msg, isStreaming: false }
-                    : msg,
-                ),
-              );
-            }
-
-            // Create new follow-up message
-            currentFollowupMessageId = `${Date.now()}-followup-${followupMessageIds.length}`;
-            followupMessageIds.push(currentFollowupMessageId);
-            expectingNewFollowup = false;
-
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: currentFollowupMessageId!,
-                sender: "Assistant",
-                content: chunk.content,
-                timestamp: new Date(),
-                isStreaming: true,
-              },
-            ]);
-          } else {
-            // Update existing follow-up message
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: toolMessageId,
+              sender: "System",
+              content: `🔧 ${chunk.content}`,
+              timestamp: new Date(),
+              isStreaming: true,
+            },
+          ]);
+        } else if (chunk.type === "tool_complete") {
+          // Tool execution completed - update the tool message
+          if (currentToolMessageId) {
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === currentFollowupMessageId
-                  ? { ...msg, content: chunk.content, isStreaming: true }
+                msg.id === currentToolMessageId
+                  ? {
+                      ...msg,
+                      content: `✅ ${chunk.content}`,
+                      isStreaming: false,
+                    }
                   : msg,
               ),
             );
+            currentToolMessageId = null;
           }
 
-          lastContentLength = chunk.content.length;
-        } else if (chunk.type === "tool_call") {
-          // Tool execution started
+          // Check if the tool result contains an image (screenshot)
           try {
-            const toolData = JSON.parse(chunk.content);
-            const toolName = toolData.name || "unknown_tool";
+            console.log("[ChatRoom] Raw toolResult:", chunk.toolResult);
+            if (!chunk.toolResult) {
+              console.warn("[ChatRoom] No toolResult in chunk");
+              return;
+            }
 
-            // Add tool execution message
-            const toolMessageId = `${Date.now()}-tool`;
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: toolMessageId,
-                sender: "System",
-                content: `🔧 Using tool: ${toolName}`,
-                timestamp: new Date(),
-                isToolCall: true,
-                toolName,
-              },
-            ]);
+            const toolResult = JSON.parse(chunk.toolResult);
+            console.log("[ChatRoom] Parsed toolResult:", toolResult);
+
+            if (
+              toolResult?.dataUrl &&
+              toolResult.dataUrl.startsWith("data:image")
+            ) {
+              console.log(
+                "[ChatRoom] Found image dataUrl, creating screenshot message",
+              );
+              // Display the screenshot in chat
+              const screenshotMessageId = `${Date.now()}-screenshot`;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: screenshotMessageId,
+                  sender: "System",
+                  content: toolResult.message || "Screenshot captured",
+                  timestamp: new Date(),
+                  imageUrl: toolResult.dataUrl,
+                },
+              ]);
+            } else {
+              console.log(
+                "[ChatRoom] No dataUrl found in toolResult or not an image",
+              );
+            }
           } catch (e) {
-            console.warn("Failed to parse tool data:", chunk.content);
+            console.error(
+              "[ChatRoom] Failed to parse tool result for image display:",
+              e,
+            );
+            console.error("[ChatRoom] Raw chunk.toolResult:", chunk.toolResult);
           }
-        } else if (chunk.type === "tool_error") {
-          // Tool execution failed
-          try {
-            const errorData = JSON.parse(chunk.content);
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: `${Date.now()}-error`,
-                sender: "System",
-                content: `❌ Tool error: ${errorData.error}`,
-                timestamp: new Date(),
-              },
-            ]);
-          } catch (e) {
-            console.warn("Failed to parse tool error:", chunk.content);
-          }
+        } else if (chunk.type === "complete") {
+          // Streaming complete, mark as finished
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, isStreaming: false }
+                : msg,
+            ),
+          );
         }
       }
-
-      // Mark streaming as complete for original and all follow-up messages
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId || followupMessageIds.includes(msg.id)
-            ? { ...msg, isStreaming: false }
-            : msg,
-        ),
-      );
     } catch (error) {
-      console.error("[ChatRoom] LangGraph stream error:", error);
+      if (error instanceof Error && error.name === "AbortError") {
+        console.log("Request aborted");
+        return;
+      }
       throw error;
     }
   };
@@ -328,18 +349,8 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 </div>
               );
             } else if (message.sender === "Assistant") {
-              const toolCallPattern =
-                /TOOL_CALL:\s*(\w+)\s*PARAMS:\s*({[^}]*})/gs;
-
-              const cleanedContent = message.content.replace(
-                toolCallPattern,
-                () => {
-                  return "";
-                },
-              );
-
               // Parse markdown to HTML
-              const htmlContent = marked.parse(cleanedContent) as string;
+              const htmlContent = marked.parse(message.content) as string;
 
               return (
                 <div key={message.id} className="flex justify-start">
@@ -348,17 +359,67 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                       dangerouslySetInnerHTML={{ __html: htmlContent }}
                       className="ai-message"
                     />
+                    {message.isStreaming && (
+                      <span className="animate-pulse ml-1">|</span>
+                    )}
                   </div>
                 </div>
               );
             } else if (message.sender === "System") {
-              return (
-                <div key={message.id} className="flex justify-start">
-                  <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none opacity-50">
-                    <p>{message.content}</p>
+              if (message.isCollapsible) {
+                // Collapsible intermediate text
+                return (
+                  <div key={message.id} className="my-1">
+                    <button
+                      onClick={() => {
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === message.id
+                              ? { ...msg, isExpanded: !msg.isExpanded }
+                              : msg,
+                          ),
+                        );
+                      }}
+                      className="flex items-center gap-2 text-muted-foreground text-xs py-1 hover:text-foreground transition-colors"
+                    >
+                      <span className="opacity-50">
+                        {message.isExpanded ? "▼" : "▶"} Intermediate response
+                      </span>
+                    </button>
+                    {message.isExpanded && (
+                      <div className="mt-1 ml-4 text-xs text-muted-foreground opacity-70 border-l-2 border-muted pl-3">
+                        {message.content}
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
+                );
+              } else if (message.imageUrl) {
+                // System messages with images
+                return (
+                  <div key={message.id} className="flex justify-start">
+                    <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none opacity-50">
+                      <p>{message.content}</p>
+                      <img
+                        src={message.imageUrl}
+                        alt="Screenshot"
+                        className="mt-2 rounded border max-w-full h-auto"
+                      />
+                    </div>
+                  </div>
+                );
+              } else {
+                // System messages without images
+                return (
+                  <div key={message.id} className="flex justify-start">
+                    <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none opacity-50">
+                      <p>{message.content}</p>
+                      {message.isStreaming && (
+                        <span className="animate-pulse">...</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
             }
           })}
           <div ref={messagesEndRef} />
