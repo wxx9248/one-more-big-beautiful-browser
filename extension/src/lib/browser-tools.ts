@@ -175,6 +175,51 @@ export const captureScreenshotTool = new DynamicStructuredTool({
 });
 
 /**
+ * Analyze screenshot - Captures a screenshot and returns it in a format the LLM can see
+ */
+export const analyzeScreenshotTool = new DynamicStructuredTool({
+  name: "analyzeScreenshot",
+  description:
+    "Capture a screenshot of the currently visible viewport and analyze its contents. Use this when you need to see what's actually displayed on the page, such as images, charts, UI elements, or visual layouts. This allows you to visually analyze the page content beyond just the text.",
+  schema: z.object({
+    question: z
+      .string()
+      .optional()
+      .describe(
+        "Optional: A specific question about the screenshot (e.g., 'What color is the header?', 'How many images are visible?')",
+      ),
+  }),
+  func: async ({ question }): Promise<string | Array<any>> => {
+    const response = await sendToolMessage<ScreenshotData>(
+      ToolName.CAPTURE_SCREENSHOT,
+      {},
+    );
+
+    // Extract base64 data from data URL (remove "data:image/png;base64," prefix)
+    const base64Data = response.data!.dataUrl.split(",")[1];
+
+    // Return image in Anthropic's format for vision
+    // This returns an array of content blocks that will be passed to the LLM
+    return JSON.stringify([
+      {
+        type: "text",
+        text: question
+          ? `Here's a screenshot of the current page. ${question}`
+          : "Here's a screenshot of the current page. Please describe what you see.",
+      },
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: base64Data,
+        },
+      },
+    ]);
+  },
+});
+
+/**
  * Get all open tabs
  */
 export const getAllTabsTool = new DynamicStructuredTool({
@@ -297,6 +342,7 @@ export const browserTools = [
   fillInputTool,
   scrollToElementTool,
   captureScreenshotTool,
+  analyzeScreenshotTool,
   captureScreenshotAndDownloadTool,
   getAllTabsTool,
   switchToTabTool,

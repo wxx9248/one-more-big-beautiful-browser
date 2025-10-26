@@ -155,19 +155,44 @@ function convertToAnthropicMessages(
       }
     } else if (msg instanceof ToolMessage) {
       // Tool result - Anthropic expects these as user messages with tool_result type
-      anthropicMessages.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: msg.tool_call_id || msg.name || "unknown",
-            content:
-              typeof msg.content === "string"
-                ? msg.content
-                : JSON.stringify(msg.content),
-          },
-        ],
-      });
+      // Check if content is multimodal (array with image blocks)
+      if (
+        Array.isArray(msg.content) &&
+        msg.content.some(
+          (item: any) => item.type === "image" || item.type === "image_url",
+        )
+      ) {
+        // For multimodal content (like images from analyzeScreenshot),
+        // Anthropic requires tool_result wrapper, and content can be an array of blocks
+        console.log(
+          "[LangGraph] Converting multimodal ToolMessage to tool_result with content blocks",
+        );
+        anthropicMessages.push({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id || msg.name || "unknown",
+              content: msg.content, // Content is an array of text/image blocks
+            },
+          ],
+        });
+      } else {
+        // Regular tool result
+        anthropicMessages.push({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id || msg.name || "unknown",
+              content:
+                typeof msg.content === "string"
+                  ? msg.content
+                  : JSON.stringify(msg.content),
+            },
+          ],
+        });
+      }
     }
   }
 
@@ -408,9 +433,33 @@ async function toolNode(
   for (const toolCall of lastMessage.tool_calls) {
     const result = await executeToolCall(toolCall.name, toolCall.args || {});
 
+    // Try to parse result as multimodal content (images, etc.)
+    let content: string | Array<any> = result;
+    try {
+      const parsed = JSON.parse(result);
+      // Check if it's an array of content blocks (multimodal format)
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        parsed.some(
+          (item) =>
+            item.type === "image" ||
+            item.type === "image_url" ||
+            item.type === "text",
+        )
+      ) {
+        content = parsed;
+        console.log(
+          `[LangGraph] Tool ${toolCall.name} returned multimodal content with ${parsed.length} blocks`,
+        );
+      }
+    } catch (e) {
+      // Not JSON or not multimodal format, keep as string
+    }
+
     toolMessages.push(
       new ToolMessage({
-        content: result,
+        content: content,
         tool_call_id: toolCall.id || toolCall.name,
         name: toolCall.name,
       }),
@@ -541,14 +590,27 @@ export async function* streamChat(
           // Get the last tool result content for image display
           const lastToolMessage = toolMessages[toolMessages.length - 1];
           const toolResult = lastToolMessage?.content || "";
+
+          // Log toolResult safely (handle both string and array content)
+          const toolResultPreview =
+            typeof toolResult === "string"
+              ? toolResult.substring(0, 200)
+              : Array.isArray(toolResult)
+                ? `[Multimodal content with ${toolResult.length} blocks]`
+                : String(toolResult).substring(0, 200);
+
           console.log(
             "[LangGraph] Tool complete - toolResult:",
-            toolResult?.substring(0, 200),
+            toolResultPreview,
           );
+
           yield {
             type: "tool_complete",
             content: `Completed: ${toolNames}`,
-            toolResult: toolResult,
+            toolResult:
+              typeof toolResult === "string"
+                ? toolResult
+                : JSON.stringify(toolResult),
           };
         }
       }
