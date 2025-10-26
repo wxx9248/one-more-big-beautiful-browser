@@ -1,11 +1,21 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
-import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
-import { ArrowUp, Loader2 } from "lucide-react";
+import { ArrowUp, Loader2, PlusIcon, SettingsIcon } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
 import { streamChat } from "@/src/lib/langgraph";
+
+import "@/src/styles/messages.css";
+import { marked } from "marked";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/src/components/ui/dropdown-menu";
+import { cn } from "../lib/utils";
 
 interface Message {
   id: string;
@@ -32,6 +42,7 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     isAuthenticated: false,
     token: null,
   });
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     loadAuthState();
@@ -267,19 +278,48 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     }
   };
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   return (
     <div className="fixed top-0 left-0 h-screen w-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="border-b p-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Chat Room</h1>
-          {authState.isAuthenticated && (
-            <p className="text-xs text-green-600">Authenticated</p>
-          )}
+      <div className="h-8 p-1 px-2 flex items-center justify-start">
+        <div className="flex-1" />
+        <div className="flex items-center gap-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="cursor-pointer hover:bg-muted rounded-sm h-6 w-6"
+          >
+            <PlusIcon className="size-4 stroke-[1.5]" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="cursor-pointer hover:bg-muted rounded-sm h-6 w-6"
+              >
+                <SettingsIcon className="size-4 stroke-[1.5]" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="mx-2 p-1 px-1 min-w-36">
+              <DropdownMenuItem className="text-xs">Settings</DropdownMenuItem>
+              <DropdownMenuItem className="text-xs" onClick={onLogout}>
+                <span className="text-destructive-foreground hover:text-destructive">
+                  Logout
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <Button variant="outline" size="sm" onClick={onLogout}>
-          Log Out
-        </Button>
       </div>
 
       {/* Error Display */}
@@ -290,106 +330,99 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((message) =>
-          message.sender === "System" ? (
-            message.isCollapsible ? (
-              // Collapsible intermediate text
-              <div key={message.id} className="my-1">
-                <button
-                  onClick={() => {
-                    setMessages((prev) =>
-                      prev.map((msg) =>
-                        msg.id === message.id
-                          ? { ...msg, isExpanded: !msg.isExpanded }
-                          : msg,
-                      ),
-                    );
-                  }}
-                  className="flex items-center gap-2 text-muted-foreground text-xs py-1 hover:text-foreground transition-colors"
-                >
-                  <span className="opacity-50">
-                    {message.isExpanded ? "▼" : "▶"} Intermediate response
-                  </span>
-                </button>
-                {message.isExpanded && (
-                  <div className="mt-1 ml-4 text-xs text-muted-foreground opacity-70 border-l-2 border-muted pl-3">
-                    {message.content}
-                  </div>
-                )}
-              </div>
-            ) : message.imageUrl ? (
-              // System messages with images - render as card to show image
-              <Card key={message.id} className="max-w-[80%] mr-auto">
-                <div className="p-3 space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold">
-                      {message.sender}
-                    </span>
-                    <span className="text-xs opacity-70">
-                      {message.timestamp.toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <p className="text-sm">{message.content}</p>
-                  <img
-                    src={message.imageUrl}
-                    alt="Screenshot"
-                    className="mt-2 rounded border max-w-full h-auto"
-                    style={{ maxHeight: "300px" }}
-                  />
-                </div>
-              </Card>
-            ) : (
-              // System messages without images - simple text
-              <div
-                key={message.id}
-                className="flex items-center gap-2 text-muted-foreground text-xs py-1"
-              >
-                <span className="opacity-50">{message.content}</span>
-                {message.isStreaming && (
-                  <span className="animate-pulse">...</span>
-                )}
-              </div>
-            )
-          ) : (
-            // Regular messages with card
-            <Card
-              key={message.id}
-              className={`max-w-[80%] ${
-                message.sender === "You"
-                  ? "ml-auto bg-primary text-primary-foreground"
-                  : "mr-auto"
-              }`}
-            >
-              <div className="p-3 space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold">
-                    {message.sender}
-                  </span>
-                  <span className="text-xs opacity-70">
-                    {message.timestamp.toLocaleTimeString()}
-                  </span>
-                </div>
-                <p className="text-sm">
-                  {message.content}
-                  {message.isStreaming && (
-                    <span className="animate-pulse ml-1">|</span>
+      {messages.length > 0 && (
+        <div className="flex-1 overflow-y-auto px-3 pb-8 flex flex-col gap-0">
+          {messages.map((message, index) => {
+            if (message.sender === "You") {
+              return (
+                <div
+                  key={message.id}
+                  className={cn(
+                    "w-full rounded-sm border border-border px-2 py-1 bg-muted mb-2",
+                    index === 0 ? "mt-1" : "mt-4",
                   )}
-                </p>
-                {message.imageUrl && (
-                  <img
-                    src={message.imageUrl}
-                    alt="Screenshot"
-                    className="mt-2 rounded border max-w-full h-auto"
-                    style={{ maxHeight: "300px" }}
-                  />
-                )}
-              </div>
-            </Card>
-          ),
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+                >
+                  <p>{message.content}</p>
+                </div>
+              );
+            } else if (message.sender === "Assistant") {
+              // Parse markdown to HTML
+              const htmlContent = marked.parse(message.content) as string;
+
+              return (
+                <div key={message.id} className="flex justify-start">
+                  <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none prose prose-sm max-w-none">
+                    <div
+                      dangerouslySetInnerHTML={{ __html: htmlContent }}
+                      className="ai-message"
+                    />
+                    {message.isStreaming && (
+                      <span className="animate-pulse ml-1">|</span>
+                    )}
+                  </div>
+                </div>
+              );
+            } else if (message.sender === "System") {
+              if (message.isCollapsible) {
+                // Collapsible intermediate text
+                return (
+                  <div key={message.id} className="my-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === message.id
+                              ? { ...msg, isExpanded: !msg.isExpanded }
+                              : msg,
+                          ),
+                        );
+                      }}
+                      className="flex items-center gap-2 text-muted-foreground text-xs py-1 hover:text-foreground transition-colors"
+                    >
+                      <span className="opacity-50">
+                        {message.isExpanded ? "▼" : "▶"} Intermediate response
+                      </span>
+                    </button>
+                    {message.isExpanded && (
+                      <div className="mt-1 ml-4 text-xs text-muted-foreground opacity-70 border-l-2 border-muted pl-3">
+                        {message.content}
+                      </div>
+                    )}
+                  </div>
+                );
+              } else if (message.imageUrl) {
+                // System messages with images
+                return (
+                  <div key={message.id} className="flex justify-start">
+                    <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none">
+                      <p>{message.content}</p>
+                      <img
+                        src={message.imageUrl}
+                        alt="Screenshot"
+                        className="mt-2 rounded border max-w-full h-auto"
+                      />
+                    </div>
+                  </div>
+                );
+              } else {
+                // System messages without images
+                return (
+                  <div key={message.id} className="flex justify-start">
+                    <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none opacity-50">
+                      <p>{message.content}</p>
+                      {message.isStreaming && (
+                        <span className="animate-pulse">...</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+            }
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="pb-2 px-2">

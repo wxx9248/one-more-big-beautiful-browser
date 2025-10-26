@@ -28,10 +28,27 @@ export default defineContentScript({
         sender: browser.Runtime.MessageSender,
         sendResponse: (response: ToolResponse) => void,
       ) => {
+        console.log("[Content API] Received message:", message);
+
         if (message.type === "TOOL_CALL") {
+          console.log(
+            `[Content API] Handling tool call: ${message.toolName}`,
+            message.params,
+          );
+
           handleToolCall(message as ToolMessage)
-            .then((response) => sendResponse(response))
+            .then((response) => {
+              console.log(
+                `[Content API] Sending response for ${message.toolName}:`,
+                response,
+              );
+              sendResponse(response);
+            })
             .catch((error) => {
+              console.error(
+                `[Content API] Error handling ${message.toolName}:`,
+                error,
+              );
               sendResponse({
                 type: "TOOL_RESPONSE",
                 requestId: message.requestId,
@@ -41,6 +58,8 @@ export default defineContentScript({
             });
           return true; // Keep message channel open for async response
         }
+
+        return false; // Not a tool call, don't keep channel open
       },
     );
   },

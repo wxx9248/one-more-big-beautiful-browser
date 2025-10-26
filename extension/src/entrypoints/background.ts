@@ -3,6 +3,7 @@ import {
   MessageType,
   type AuthMessage,
   type AuthState,
+  AuthSuccessMessage,
 } from "@/src/types/auth";
 import type { ToolMessage, ToolResponse } from "@/src/types/tools";
 
@@ -56,7 +57,7 @@ export default defineBackground(() => {
         case MessageType.AUTH_TOKEN:
         case MessageType.AUTH_SUCCESS:
           // Store the token
-          handleAuthSuccess((message as AuthMessage).token);
+          handleAuthSuccess((message as AuthSuccessMessage).token);
           sendResponse(authState);
           break;
 
