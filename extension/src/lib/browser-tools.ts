@@ -21,7 +21,7 @@ import { ToolName } from "@/src/types/tools";
  * Get information about the current tab
  */
 export const getCurrentTabInfoTool = new DynamicStructuredTool({
-  name: "get_current_tab_info",
+  name: "getCurrentTabInfo",
   description:
     "Get basic information about the current browser tab, including URL, title, and domain. Use this when you need to know what page the user is currently viewing.",
   schema: z.object({}),
@@ -38,7 +38,7 @@ export const getCurrentTabInfoTool = new DynamicStructuredTool({
  * Extract page content
  */
 export const getPageContentTool = new DynamicStructuredTool({
-  name: "get_page_content",
+  name: "getPageContent",
   description:
     "Extract the main content from the current web page, including title, headings, links, and readable text. Use this to understand what's on the page. Returns cleaned text content (up to 10,000 characters).",
   schema: z.object({}),
@@ -55,7 +55,7 @@ export const getPageContentTool = new DynamicStructuredTool({
  * Find elements on the page
  */
 export const findElementsTool = new DynamicStructuredTool({
-  name: "find_elements",
+  name: "findElements",
   description:
     "Find elements on the page matching a CSS selector. Returns information about matching elements including their text content, tag name, attributes, and XPath. Use this to locate specific elements before interacting with them. Examples: 'button', '.submit-button', '#login-form input[type=\"email\"]'",
   schema: z.object({
@@ -83,7 +83,7 @@ export const findElementsTool = new DynamicStructuredTool({
  * Click an element
  */
 export const clickElementTool = new DynamicStructuredTool({
-  name: "click_element",
+  name: "clickElement",
   description:
     "Click an element on the page using a CSS selector. The element will be scrolled into view before clicking. Use this to click buttons, links, or other interactive elements. Example selectors: 'button.submit', '#login-button', 'a[href=\"/signup\"]'",
   schema: z.object({
@@ -106,7 +106,7 @@ export const clickElementTool = new DynamicStructuredTool({
  * Fill an input field
  */
 export const fillInputTool = new DynamicStructuredTool({
-  name: "fill_input",
+  name: "fillInput",
   description:
     "Fill a text input, textarea, or select element with a value. This triggers appropriate input events for React/Vue compatibility. Use this to fill out forms. Example selectors: 'input[name=\"email\"]', '#password', 'textarea.message'",
   schema: z.object({
@@ -130,7 +130,7 @@ export const fillInputTool = new DynamicStructuredTool({
  * Scroll to an element
  */
 export const scrollToElementTool = new DynamicStructuredTool({
-  name: "scroll_to_element",
+  name: "scrollToElement",
   description:
     "Scroll the page to bring an element into view. Use this to make hidden elements visible before interacting with them.",
   schema: z.object({
@@ -149,7 +149,7 @@ export const scrollToElementTool = new DynamicStructuredTool({
  * Capture screenshot
  */
 export const captureScreenshotTool = new DynamicStructuredTool({
-  name: "capture_screenshot",
+  name: "captureScreenshot",
   description:
     "Capture a screenshot of the currently visible viewport. Returns a base64-encoded PNG image data URL. Use this when you need to see what's visible on the page.",
   schema: z.object({}),
@@ -166,7 +166,7 @@ export const captureScreenshotTool = new DynamicStructuredTool({
  * Get all open tabs
  */
 export const getAllTabsTool = new DynamicStructuredTool({
-  name: "get_all_tabs",
+  name: "getAllTabs",
   description:
     "Get a list of all open browser tabs with their IDs, URLs, and titles. Use this to see what other pages the user has open.",
   schema: z.object({}),
@@ -182,9 +182,9 @@ export const getAllTabsTool = new DynamicStructuredTool({
  * Switch to a different tab
  */
 export const switchToTabTool = new DynamicStructuredTool({
-  name: "switch_to_tab",
+  name: "switchToTab",
   description:
-    "Switch to a different browser tab by its ID. Use get_all_tabs first to find the tab ID you want to switch to.",
+    "Switch to a different browser tab by its ID. Use getAllTabs first to find the tab ID you want to switch to.",
   schema: z.object({
     tabId: z.number().describe("The ID of the tab to switch to"),
   }),
