@@ -308,39 +308,76 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((message) => (
-          <Card
-            key={message.id}
-            className={`max-w-[80%] ${
-              message.sender === "You"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : message.isToolCall
-                  ? "mx-auto bg-blue-50 border-blue-200"
-                  : "mr-auto"
-            }`}
-          >
-            <div className="p-3 space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold flex items-center gap-1">
-                  {message.isToolCall && <Wrench className="w-3 h-3" />}
-                  {message.sender}
-                </span>
-                <span className="text-xs opacity-70">
-                  {message.timestamp.toLocaleTimeString()}
-                </span>
-              </div>
-              <p className="text-sm">
-                {message.content}
-                {message.isStreaming && (
-                  <span className="animate-pulse ml-1">|</span>
-                )}
-              </p>
-            </div>
-          </Card>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
+      {messages.length > 0 && (
+        <div className="flex-1 overflow-y-auto px-3 py-2 flex flex-col gap-0">
+          {messages.map((message) => {
+            if (message.sender === "You") {
+              return (
+                <div
+                  key={message.id}
+                  className="w-full rounded-sm border border-border px-2 py-1 bg-muted mb-2 mt-4"
+                >
+                  <p>{message.content}</p>
+                </div>
+              );
+            } else if (message.sender === "Assistant") {
+              const toolCallPattern =
+                /TOOL_CALL:\s*(\w+)\s*PARAMS:\s*({[^}]*})/gs;
+
+              const cleanedContent = message.content.replace(
+                toolCallPattern,
+                () => {
+                  return "";
+                },
+              );
+              return (
+                <div key={message.id} className="flex justify-start">
+                  <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none">
+                    <p>{cleanedContent}</p>
+                  </div>
+                </div>
+              );
+            } else if (message.sender === "System") {
+              return (
+                <div key={message.id} className="flex justify-start">
+                  <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none opacity-50">
+                    <p>{message.content}</p>
+                  </div>
+                </div>
+              );
+            }
+            // <Card
+            //   key={message.id}
+            //   className={`max-w-[80%] ${
+            //     message.sender === "You"
+            //       ? "ml-auto bg-primary text-primary-foreground"
+            //       : message.isToolCall
+            //         ? "mx-auto bg-blue-50 border-blue-200"
+            //         : "mr-auto"
+            //   }`}
+            // >
+            //   <div className="p-3 space-y-1">
+            //     <div className="flex items-center justify-between gap-2">
+            //       <span className="text-xs font-semibold flex items-center gap-1">
+            //         {message.isToolCall && <Wrench className="w-3 h-3" />}
+            //         {message.sender}
+            //       </span>
+            //       <span className="text-xs opacity-70">
+            //         {message.timestamp.toLocaleTimeString()}
+            //       </span>
+            //     </div>
+            //     <p className="text-sm">
+            //       {message.content}
+            //       {message.isStreaming && (
+            //         <span className="animate-pulse ml-1">|</span>
+            //       )}
+            //     </p>
+            //   </div>
+            // </Card>
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="pb-2 px-2">
