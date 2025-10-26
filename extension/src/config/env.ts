@@ -14,7 +14,7 @@ export const AUTH_FULL_URL = AUTH_URL;
 
 // Backend API URL for chat/LLM requests
 export const BACKEND_API_URL =
-  import.meta.env.VITE_BACKEND_API_URL || "http://localhost:3001/api/chat";
+  import.meta.env.VITE_BACKEND_API_URL || "http://localhost:3001/api/anthropic";
 
 // Generate the content script match pattern from the origin
 // Converts "http://localhost:3001" to "http://localhost:3001/*"

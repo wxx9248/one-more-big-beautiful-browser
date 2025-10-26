@@ -2,10 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/src/components/ui/button";
 import { Card } from "@/src/components/ui/card";
 import { Textarea } from "@/src/components/ui/textarea";
-import { ArrowUp, Loader2, Wrench } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
-import { streamGraph } from "@/src/lib/langgraph";
+import { streamChat } from "@/src/lib/langgraph";
 
 interface Message {
   id: string;
@@ -13,8 +13,8 @@ interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
-  isToolCall?: boolean;
-  toolName?: string;
+  isCollapsible?: boolean;
+  isExpanded?: boolean;
 }
 
 interface ChatRoomProps {
@@ -22,14 +22,7 @@ interface ChatRoomProps {
 }
 
 export function ChatRoom({ onLogout }: ChatRoomProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      sender: "System",
-      content: "Welcome to the chat room!",
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -38,7 +31,6 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     isAuthenticated: false,
     token: null,
   });
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     loadAuthState();
@@ -113,14 +105,32 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     assistantMessageId: string,
   ) => {
     try {
-      console.log("[ChatRoom] Starting LangGraph stream for:", userMessage);
+      // Build message history for LangGraph
+      const { HumanMessage, AIMessage } = await import(
+        "@langchain/core/messages"
+      );
 
-      // Stream from LangGraph
-      for await (const chunk of streamGraph(userMessage)) {
-        console.log("[ChatRoom] Received chunk:", chunk);
+      // Convert message history to LangChain format
+      const messageHistory = messages
+        .filter((msg) => msg.sender !== "System") // Exclude system messages
+        .map((msg) => {
+          if (msg.sender === "You") {
+            return new HumanMessage(msg.content);
+          } else {
+            return new AIMessage(msg.content);
+          }
+        });
 
-        if (chunk.type === "llm") {
-          // LLM response - update assistant message
+      // Add current user message
+      messageHistory.push(new HumanMessage(userMessage));
+
+      // Use streamChat for token-level streaming with LangGraph
+      const stream = streamChat(messageHistory);
+      let currentToolMessageId: string | null = null;
+
+      for await (const chunk of stream) {
+        if (chunk.type === "token") {
+          // Real-time token streaming from first LLM call
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId
@@ -128,39 +138,80 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 : msg,
             ),
           );
-        } else if (chunk.type === "tools") {
-          // Tool execution - show indicator
-          try {
-            const toolData = JSON.parse(chunk.content);
-            const toolName = toolData.messages?.[0]?.name || "unknown_tool";
+        } else if (chunk.type === "intermediate_text") {
+          // Intermediate LLM output - create collapsible system message
+          const intermediateId = (Date.now() + Math.random()).toString();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: intermediateId,
+              sender: "System",
+              content: chunk.content,
+              timestamp: new Date(),
+              isCollapsible: true,
+              isExpanded: false,
+            },
+          ]);
+        } else if (chunk.type === "final_text") {
+          // Final LLM output after tools - create new assistant message
+          const finalMessageId = (Date.now() + Math.random()).toString();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: finalMessageId,
+              sender: "Assistant",
+              content: chunk.content,
+              timestamp: new Date(),
+              isStreaming: false,
+            },
+          ]);
+        } else if (chunk.type === "tool_start") {
+          // Tool execution starting - create a new message for tool status
+          const toolMessageId = (Date.now() + Math.random()).toString();
+          currentToolMessageId = toolMessageId;
 
-            // Add tool execution message
-            const toolMessageId = `${Date.now()}-tool`;
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: toolMessageId,
-                sender: "System",
-                content: `Using browser tool: ${toolName}`,
-                timestamp: new Date(),
-                isToolCall: true,
-                toolName,
-              },
-            ]);
-          } catch (e) {
-            console.warn("Failed to parse tool data:", chunk.content);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: toolMessageId,
+              sender: "System",
+              content: `🔧 ${chunk.content}`,
+              timestamp: new Date(),
+              isStreaming: true,
+            },
+          ]);
+        } else if (chunk.type === "tool_complete") {
+          // Tool execution completed - update the tool message
+          if (currentToolMessageId) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === currentToolMessageId
+                  ? {
+                      ...msg,
+                      content: `✅ ${chunk.content}`,
+                      isStreaming: false,
+                    }
+                  : msg,
+              ),
+            );
+            currentToolMessageId = null;
           }
+        } else if (chunk.type === "complete") {
+          // Streaming complete, mark as finished
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, isStreaming: false }
+                : msg,
+            ),
+          );
         }
       }
-
-      // Mark streaming as complete
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId ? { ...msg, isStreaming: false } : msg,
-        ),
-      );
     } catch (error) {
-      console.error("[ChatRoom] LangGraph stream error:", error);
+      if (error instanceof Error && error.name === "AbortError") {
+        console.log("Request aborted");
+        return;
+      }
       throw error;
     }
   };
@@ -171,15 +222,6 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
       handleSendMessage();
     }
   };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
 
   return (
     <div className="fixed top-0 left-0 h-screen w-screen bg-background flex flex-col">
@@ -205,36 +247,74 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((message) => (
-          <Card
-            key={message.id}
-            className={`max-w-[80%] ${
-              message.sender === "You"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : message.isToolCall
-                  ? "mx-auto bg-blue-50 border-blue-200"
-                  : "mr-auto"
-            }`}
-          >
-            <div className="p-3 space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold flex items-center gap-1">
-                  {message.isToolCall && <Wrench className="w-3 h-3" />}
-                  {message.sender}
-                </span>
-                <span className="text-xs opacity-70">
-                  {message.timestamp.toLocaleTimeString()}
-                </span>
-              </div>
-              <p className="text-sm">
-                {message.content}
-                {message.isStreaming && (
-                  <span className="animate-pulse ml-1">|</span>
+        {messages.map((message) =>
+          message.sender === "System" ? (
+            message.isCollapsible ? (
+              // Collapsible intermediate text
+              <div key={message.id} className="my-1">
+                <button
+                  onClick={() => {
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === message.id
+                          ? { ...msg, isExpanded: !msg.isExpanded }
+                          : msg,
+                      ),
+                    );
+                  }}
+                  className="flex items-center gap-2 text-muted-foreground text-xs py-1 hover:text-foreground transition-colors"
+                >
+                  <span className="opacity-50">
+                    {message.isExpanded ? "▼" : "▶"} Intermediate response
+                  </span>
+                </button>
+                {message.isExpanded && (
+                  <div className="mt-1 ml-4 text-xs text-muted-foreground opacity-70 border-l-2 border-muted pl-3">
+                    {message.content}
+                  </div>
                 )}
-              </p>
-            </div>
-          </Card>
-        ))}
+              </div>
+            ) : (
+              // System messages - simple text without card
+              <div
+                key={message.id}
+                className="flex items-center gap-2 text-muted-foreground text-xs py-1"
+              >
+                <span className="opacity-50">{message.content}</span>
+                {message.isStreaming && (
+                  <span className="animate-pulse">...</span>
+                )}
+              </div>
+            )
+          ) : (
+            // Regular messages with card
+            <Card
+              key={message.id}
+              className={`max-w-[80%] ${
+                message.sender === "You"
+                  ? "ml-auto bg-primary text-primary-foreground"
+                  : "mr-auto"
+              }`}
+            >
+              <div className="p-3 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold">
+                    {message.sender}
+                  </span>
+                  <span className="text-xs opacity-70">
+                    {message.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+                <p className="text-sm">
+                  {message.content}
+                  {message.isStreaming && (
+                    <span className="animate-pulse ml-1">|</span>
+                  )}
+                </p>
+              </div>
+            </Card>
+          ),
+        )}
         <div ref={messagesEndRef} />
       </div>
 
