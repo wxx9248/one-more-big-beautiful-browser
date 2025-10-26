@@ -97,39 +97,6 @@ export default async function DashboardPage() {
 
               <Divider />
 
-              {/* Token Status */}
-              {decodedToken && (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">Token Status</h3>
-                    <Chip color="success" variant="flat" size="sm">
-                      Active
-                    </Chip>
-                  </div>
-                  <div className="space-y-2">
-                    <Code className="block">
-                      User ID: {decodedToken.uid || decodedToken.id || "N/A"}
-                    </Code>
-                    <Code className="block">
-                      Email: {decodedToken.email || "N/A"}
-                    </Code>
-                    {decodedToken.email_verified !== undefined && (
-                      <Code className="block">
-                        Email Verified:{" "}
-                        {decodedToken.email_verified ? "Yes" : "No"}
-                      </Code>
-                    )}
-                    <Code className="block">JWT: {tokenPreview}...</Code>
-                  </div>
-                  <p className="text-default-400">
-                    Your session token is stored securely and will be used for
-                    authenticated requests
-                  </p>
-                </div>
-              )}
-
-              <Divider />
-
               {/* Quick Stats */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="border border-divider p-4 rounded-lg">
