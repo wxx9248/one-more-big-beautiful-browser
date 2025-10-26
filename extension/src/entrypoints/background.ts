@@ -161,7 +161,7 @@ async function handleToolCall(
 
   try {
     // Special handling for screenshot capture
-    if (toolName === "captureScreenshot") {
+    if (toolName === "capture_screenshot") {
       const screenshot = await captureScreenshot();
       sendResponse({
         type: "TOOL_RESPONSE",
@@ -173,7 +173,7 @@ async function handleToolCall(
     }
 
     // Special handling for tab management tools
-    if (toolName === "getAllTabs") {
+    if (toolName === "get_all_tabs") {
       const tabs = await getAllTabs();
       sendResponse({
         type: "TOOL_RESPONSE",
@@ -184,7 +184,7 @@ async function handleToolCall(
       return;
     }
 
-    if (toolName === "switchToTab") {
+    if (toolName === "switch_to_tab") {
       const result = await switchToTab(message.params.tabId);
       sendResponse({
         type: "TOOL_RESPONSE",
@@ -195,11 +195,17 @@ async function handleToolCall(
       return;
     }
 
-    // Get active tab
-    const tabs = await browser.tabs.query({
+    // Get active tab (remove currentWindow constraint for side panel compatibility)
+    let tabs = await browser.tabs.query({
       active: true,
       currentWindow: true,
     });
+
+    // If no tab in current window, get the last active tab from any window
+    if (!tabs.length) {
+      tabs = await browser.tabs.query({ active: true });
+    }
+
     const activeTab = tabs[0];
 
     if (!activeTab?.id) {
@@ -207,13 +213,24 @@ async function handleToolCall(
         type: "TOOL_RESPONSE",
         requestId,
         success: false,
-        error: "No active tab found",
+        error:
+          "No active tab found. Please ensure you have a browser tab open.",
       });
       return;
     }
 
+    console.log(`[Background] Using tab ${activeTab.id}: ${activeTab.url}`);
+
     // Forward message to content script
+    console.log(
+      `[Background] Forwarding to content script on tab ${activeTab.id}:`,
+      message,
+    );
     const response = await browser.tabs.sendMessage(activeTab.id, message);
+    console.log(
+      `[Background] Received response from content script:`,
+      response,
+    );
     sendResponse(response);
   } catch (error: any) {
     console.error(`[Background] Tool call failed:`, error);

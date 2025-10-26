@@ -15,4 +15,9 @@ export default defineConfig({
   vite: () => ({
     plugins: [tailwindcss()],
   }),
+
+  // Explicitly register content scripts
+  runner: {
+    disabled: false,
+  },
 });

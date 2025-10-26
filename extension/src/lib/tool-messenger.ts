@@ -30,39 +30,27 @@ export async function sendToolMessage<T = any>(
 
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
-      browser.runtime.onMessage.removeListener(responseListener);
       reject(new Error(`Tool call timeout: ${toolName} (${timeout}ms)`));
     }, timeout);
 
-    const responseListener = (
-      response: any,
-      sender: browser.Runtime.MessageSender,
-    ) => {
-      if (
-        response?.type === "TOOL_RESPONSE" &&
-        response?.requestId === requestId
-      ) {
+    // Send message and await response directly
+    browser.runtime
+      .sendMessage(message)
+      .then((response: ToolResponse<T>) => {
         clearTimeout(timeoutId);
-        browser.runtime.onMessage.removeListener(responseListener);
 
-        if (response.success) {
-          resolve(response as ToolResponse<T>);
+        if (response?.type === "TOOL_RESPONSE" && response?.success) {
+          resolve(response);
         } else {
           reject(
-            new Error(response.error || `Tool execution failed: ${toolName}`),
+            new Error(response?.error || `Tool execution failed: ${toolName}`),
           );
         }
-      }
-    };
-
-    browser.runtime.onMessage.addListener(responseListener);
-
-    // Send message to background script
-    browser.runtime.sendMessage(message).catch((error) => {
-      clearTimeout(timeoutId);
-      browser.runtime.onMessage.removeListener(responseListener);
-      reject(new Error(`Failed to send tool message: ${error.message}`));
-    });
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(new Error(`Failed to send tool message: ${error.message}`));
+      });
   });
 }
 

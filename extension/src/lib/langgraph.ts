@@ -17,6 +17,55 @@ import { getAuthToken } from "./tool-messenger";
 import { BACKEND_API_URL } from "@/src/config/env";
 
 /**
+ * Parse SSE (Server-Sent Events) stream from backend
+ * Backend returns tokens in format: data: {"token": "Hello"}
+ */
+async function parseSSEStream(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let fullText = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n");
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6).trim();
+
+          // Check for end marker
+          if (data === "[DONE]") {
+            return fullText;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.token) {
+              fullText += parsed.token;
+            }
+          } catch (e) {
+            // Skip invalid JSON lines
+            console.warn("Failed to parse SSE line:", data);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return fullText;
+}
+
+/**
  * LLM Node - Calls backend API for LLM inference
  */
 async function llmNode(
@@ -70,7 +119,7 @@ PARAMS: {"selector": "button.submit"}
 After seeing tool results, provide a natural response to the user.`,
     };
 
-    // Call backend API
+    // Call backend API with streaming
     const response = await fetch(BACKEND_API_URL, {
       method: "POST",
       headers: {
@@ -79,7 +128,6 @@ After seeing tool results, provide a natural response to the user.`,
       },
       body: JSON.stringify({
         messages: [systemMessage, ...formattedMessages],
-        stream: false, // For now, use non-streaming
       }),
     });
 
@@ -87,8 +135,8 @@ After seeing tool results, provide a natural response to the user.`,
       throw new Error(`Backend API error: ${response.status}`);
     }
 
-    const data = await response.json();
-    const aiResponse = data.message || data.content || data.response || "";
+    // Parse SSE stream
+    const aiResponse = await parseSSEStream(response);
 
     // Parse tool calls from LLM response
     const toolCalls = parseToolCalls(aiResponse);
@@ -210,26 +258,310 @@ export async function invokeGraph(userMessage: string): Promise<string> {
 }
 
 /**
- * Helper function to stream graph execution
+ * Stream follow-up LLM response after tool execution
+ */
+async function* streamWithToolResults(
+  originalUserMessage: string,
+  assistantResponse: string,
+  toolName: string,
+  toolResult: string,
+  systemMessage: any,
+): AsyncGenerator<{ type: string; content: string }, void, unknown> {
+  const token = await getAuthToken();
+  if (!token) {
+    throw new Error("No auth token available");
+  }
+
+  // Build conversation with tool results
+  // Note: Don't send multiple system messages - include tool result in user context
+  const messages = [
+    systemMessage,
+    { role: "user", content: originalUserMessage },
+    { role: "assistant", content: assistantResponse },
+    {
+      role: "user",
+      content: `The tool "${toolName}" returned the following result:\n\n${toolResult}\n\nPlease provide a natural, helpful response based on this information.`,
+    },
+  ];
+
+  console.log("[streamWithToolResults] Sending request to backend:", {
+    messagesCount: messages.length,
+    lastMessage: messages[messages.length - 1],
+  });
+
+  const response = await fetch(BACKEND_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ messages }),
+  });
+
+  console.log(
+    `[streamWithToolResults] Backend response status: ${response.status}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(`Backend API error: ${response.status}`);
+  }
+
+  // Stream the follow-up response
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let fullText = "";
+  let chunkCount = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        console.log(
+          `[streamWithToolResults] Stream ended after ${chunkCount} chunks`,
+        );
+        break;
+      }
+
+      chunkCount++;
+      const chunk = decoder.decode(value, { stream: true });
+      console.log(
+        `[streamWithToolResults] Received chunk ${chunkCount}:`,
+        chunk,
+      );
+
+      const lines = chunk.split("\n");
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6).trim();
+
+          if (data === "[DONE]") {
+            console.log(
+              `[streamWithToolResults] Stream complete, total text length: ${fullText.length}`,
+            );
+            yield {
+              type: "llm_followup",
+              content: fullText,
+            };
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.token) {
+              fullText += parsed.token;
+              console.log(
+                `[streamWithToolResults] Token received, total length: ${fullText.length}`,
+              );
+              yield {
+                type: "llm_followup",
+                content: fullText,
+              };
+            }
+          } catch (e) {
+            console.warn(
+              "[streamWithToolResults] Failed to parse SSE line:",
+              data,
+            );
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Helper function to stream graph execution with real-time token streaming
  */
 export async function* streamGraph(
   userMessage: string,
 ): AsyncGenerator<{ type: string; content: string }, void, unknown> {
-  const stream = await graph.stream({
-    messages: [new HumanMessage(userMessage)],
-  });
-
-  for await (const chunk of stream) {
-    if (chunk.llm) {
-      yield {
-        type: "llm",
-        content: chunk.llm.messages[0].content as string,
-      };
-    } else if (chunk.tools) {
-      yield {
-        type: "tools",
-        content: JSON.stringify(chunk.tools),
-      };
+  try {
+    const token = await getAuthToken();
+    if (!token) {
+      throw new Error("No auth token available");
     }
+
+    // Initial system message
+    const systemMessage = {
+      role: "system",
+      content: `You are a helpful AI assistant with access to browser automation tools. You can:
+- Get information about the current page (get_current_tab_info, get_page_content)
+- Find and interact with elements (find_elements, click_element, fill_input, scroll_to_element)
+- Manage tabs (get_all_tabs, switch_to_tab)
+- Capture screenshots (capture_screenshot)
+
+When the user asks you to interact with a page, use the appropriate tools. Always get page content or find elements before trying to click or fill them.
+
+To use a tool, respond with a tool call in this format:
+TOOL_CALL: tool_name
+PARAMS: {"param1": "value1", "param2": "value2"}
+
+Example:
+TOOL_CALL: get_page_content
+PARAMS: {}
+
+Or:
+TOOL_CALL: click_element
+PARAMS: {"selector": "button.submit"}
+
+After seeing tool results, provide a natural response to the user.`,
+    };
+
+    // Call backend API
+    const response = await fetch(BACKEND_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        messages: [systemMessage, { role: "user", content: userMessage }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend API error: ${response.status}`);
+    }
+
+    // Stream SSE response token by token
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("No response body");
+    }
+
+    const decoder = new TextDecoder();
+    let fullText = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6).trim();
+
+            // Check for end marker
+            if (data === "[DONE]") {
+              // Stream final content
+              yield {
+                type: "llm",
+                content: fullText,
+              };
+
+              // Check for tool calls in complete response
+              const toolCalls = parseToolCalls(fullText);
+              console.log(
+                `[streamGraph] Parsed ${toolCalls.length} tool calls from response`,
+              );
+
+              if (toolCalls.length > 0) {
+                // Execute tools
+                for (const toolCall of toolCalls) {
+                  console.log(
+                    `[streamGraph] Executing tool: ${toolCall.name}`,
+                    toolCall.args,
+                  );
+
+                  yield {
+                    type: "tool_call",
+                    content: JSON.stringify({
+                      name: toolCall.name,
+                      args: toolCall.args,
+                    }),
+                  };
+
+                  // Execute the tool
+                  const tool = browserTools.find(
+                    (t) => t.name === toolCall.name,
+                  );
+                  if (tool) {
+                    try {
+                      const toolResult = await tool.func(toolCall.args as any);
+                      console.log(
+                        `[streamGraph] Tool ${toolCall.name} result:`,
+                        toolResult,
+                      );
+
+                      yield {
+                        type: "tool_result",
+                        content: JSON.stringify({
+                          name: toolCall.name,
+                          result: toolResult,
+                        }),
+                      };
+
+                      // Continue conversation with tool result
+                      console.log(
+                        `[streamGraph] Streaming follow-up response with tool results...`,
+                      );
+                      yield* streamWithToolResults(
+                        userMessage,
+                        fullText,
+                        toolCall.name,
+                        toolResult,
+                        systemMessage,
+                      );
+                      console.log(
+                        `[streamGraph] Follow-up response streaming complete`,
+                      );
+                    } catch (error: any) {
+                      console.error(
+                        `[streamGraph] Tool ${toolCall.name} error:`,
+                        error,
+                      );
+                      yield {
+                        type: "tool_error",
+                        content: JSON.stringify({
+                          name: toolCall.name,
+                          error: error.message,
+                        }),
+                      };
+                    }
+                  } else {
+                    console.warn(
+                      `[streamGraph] Tool not found: ${toolCall.name}`,
+                    );
+                  }
+                }
+              }
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.token) {
+                fullText += parsed.token;
+                // Yield each token as it arrives
+                yield {
+                  type: "llm",
+                  content: fullText,
+                };
+              }
+            } catch (e) {
+              console.warn("Failed to parse SSE line:", data);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } catch (error: any) {
+    console.error("[LangGraph] Stream error:", error);
+    yield {
+      type: "error",
+      content: error.message || "Unknown error",
+    };
   }
 }

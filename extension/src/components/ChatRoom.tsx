@@ -112,6 +112,8 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
     userMessage: string,
     assistantMessageId: string,
   ) => {
+    let followupMessageId: string | null = null;
+
     try {
       console.log("[ChatRoom] Starting LangGraph stream for:", userMessage);
 
@@ -120,7 +122,7 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
         console.log("[ChatRoom] Received chunk:", chunk);
 
         if (chunk.type === "llm") {
-          // LLM response - update assistant message
+          // Initial LLM response - update assistant message
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId
@@ -128,11 +130,35 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 : msg,
             ),
           );
-        } else if (chunk.type === "tools") {
-          // Tool execution - show indicator
+        } else if (chunk.type === "llm_followup") {
+          // Follow-up response after tool execution - create new message
+          if (!followupMessageId) {
+            followupMessageId = `${Date.now()}-followup`;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: followupMessageId!,
+                sender: "Assistant",
+                content: chunk.content,
+                timestamp: new Date(),
+                isStreaming: true,
+              },
+            ]);
+          } else {
+            // Update existing follow-up message
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === followupMessageId
+                  ? { ...msg, content: chunk.content, isStreaming: true }
+                  : msg,
+              ),
+            );
+          }
+        } else if (chunk.type === "tool_call") {
+          // Tool execution started
           try {
             const toolData = JSON.parse(chunk.content);
-            const toolName = toolData.messages?.[0]?.name || "unknown_tool";
+            const toolName = toolData.name || "unknown_tool";
 
             // Add tool execution message
             const toolMessageId = `${Date.now()}-tool`;
@@ -141,7 +167,7 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
               {
                 id: toolMessageId,
                 sender: "System",
-                content: `Using browser tool: ${toolName}`,
+                content: `🔧 Using tool: ${toolName}`,
                 timestamp: new Date(),
                 isToolCall: true,
                 toolName,
@@ -150,13 +176,42 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
           } catch (e) {
             console.warn("Failed to parse tool data:", chunk.content);
           }
+        } else if (chunk.type === "tool_result") {
+          // Tool execution completed
+          try {
+            const resultData = JSON.parse(chunk.content);
+            console.log(
+              `[ChatRoom] Tool ${resultData.name} result:`,
+              resultData.result,
+            );
+          } catch (e) {
+            console.warn("Failed to parse tool result:", chunk.content);
+          }
+        } else if (chunk.type === "tool_error") {
+          // Tool execution failed
+          try {
+            const errorData = JSON.parse(chunk.content);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `${Date.now()}-error`,
+                sender: "System",
+                content: `❌ Tool error: ${errorData.error}`,
+                timestamp: new Date(),
+              },
+            ]);
+          } catch (e) {
+            console.warn("Failed to parse tool error:", chunk.content);
+          }
         }
       }
 
-      // Mark streaming as complete
+      // Mark streaming as complete for both original and follow-up messages
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === assistantMessageId ? { ...msg, isStreaming: false } : msg,
+          msg.id === assistantMessageId || msg.id === followupMessageId
+            ? { ...msg, isStreaming: false }
+            : msg,
         ),
       );
     } catch (error) {
