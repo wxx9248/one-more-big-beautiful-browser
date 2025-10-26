@@ -6,6 +6,9 @@ import { ArrowUp, Loader2, PlusIcon, SettingsIcon, Wrench } from "lucide-react";
 import { MessageType, type AuthState } from "@/src/types/auth";
 import { browser } from "wxt/browser";
 import { streamGraph } from "@/src/lib/langgraph";
+import { marked } from "marked";
+
+import "@/src/styles/messages.css";
 
 import {
   DropdownMenu,
@@ -15,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
+import { cn } from "../lib/utils";
 
 interface Message {
   id: string;
@@ -309,13 +313,16 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
 
       {/* Messages Area */}
       {messages.length > 0 && (
-        <div className="flex-1 overflow-y-auto px-3 py-2 flex flex-col gap-0">
-          {messages.map((message) => {
+        <div className="flex-1 overflow-y-auto px-3 pb-8 flex flex-col gap-0">
+          {messages.map((message, index) => {
             if (message.sender === "You") {
               return (
                 <div
                   key={message.id}
-                  className="w-full rounded-sm border border-border px-2 py-1 bg-muted mb-2 mt-4"
+                  className={cn(
+                    "w-full rounded-sm border border-border px-2 py-1 bg-muted mb-2",
+                    index === 0 ? "mt-1" : "mt-4",
+                  )}
                 >
                   <p>{message.content}</p>
                 </div>
@@ -330,10 +337,17 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                   return "";
                 },
               );
+
+              // Parse markdown to HTML
+              const htmlContent = marked.parse(cleanedContent) as string;
+
               return (
                 <div key={message.id} className="flex justify-start">
-                  <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none">
-                    <p>{cleanedContent}</p>
+                  <div className="bg-background text-secondary-foreground px-2 py-1 rounded-none prose prose-sm max-w-none">
+                    <div
+                      dangerouslySetInnerHTML={{ __html: htmlContent }}
+                      className="ai-message"
+                    />
                   </div>
                 </div>
               );
@@ -346,34 +360,6 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                 </div>
               );
             }
-            // <Card
-            //   key={message.id}
-            //   className={`max-w-[80%] ${
-            //     message.sender === "You"
-            //       ? "ml-auto bg-primary text-primary-foreground"
-            //       : message.isToolCall
-            //         ? "mx-auto bg-blue-50 border-blue-200"
-            //         : "mr-auto"
-            //   }`}
-            // >
-            //   <div className="p-3 space-y-1">
-            //     <div className="flex items-center justify-between gap-2">
-            //       <span className="text-xs font-semibold flex items-center gap-1">
-            //         {message.isToolCall && <Wrench className="w-3 h-3" />}
-            //         {message.sender}
-            //       </span>
-            //       <span className="text-xs opacity-70">
-            //         {message.timestamp.toLocaleTimeString()}
-            //       </span>
-            //     </div>
-            //     <p className="text-sm">
-            //       {message.content}
-            //       {message.isStreaming && (
-            //         <span className="animate-pulse ml-1">|</span>
-            //       )}
-            //     </p>
-            //   </div>
-            // </Card>
           })}
           <div ref={messagesEndRef} />
         </div>
