@@ -14,6 +14,8 @@ import type {
   FillInputResult,
   ScrollResult,
   ScreenshotData,
+  DownloadResult,
+  ScreenshotAndDownloadResult,
 } from "@/src/types/tools";
 import { ToolName } from "@/src/types/tools";
 
@@ -151,14 +153,23 @@ export const scrollToElementTool = new DynamicStructuredTool({
 export const captureScreenshotTool = new DynamicStructuredTool({
   name: "captureScreenshot",
   description:
-    "Capture a screenshot of the currently visible viewport. Returns a base64-encoded PNG image data URL. Use this when you need to see what's visible on the page.",
+    "Capture a screenshot of the currently visible viewport and display it in the chat. Returns a base64-encoded PNG image data URL. Note: This only displays the screenshot, it doesn't download it. Use captureScreenshotAndDownload if you want to save it to downloads.",
   schema: z.object({}),
   func: async (): Promise<string> => {
     const response = await sendToolMessage<ScreenshotData>(
       ToolName.CAPTURE_SCREENSHOT,
       {},
     );
-    return `Screenshot captured at ${new Date(response.data!.timestamp).toISOString()}. Data URL length: ${response.data!.dataUrl.length} characters.`;
+    // Return the full data object so it can be displayed in chat
+    return JSON.stringify(
+      {
+        message: `Screenshot captured at ${new Date(response.data!.timestamp).toISOString()}`,
+        dataUrl: response.data!.dataUrl,
+        timestamp: response.data!.timestamp,
+      },
+      null,
+      2,
+    );
   },
 });
 
@@ -198,6 +209,60 @@ export const switchToTabTool = new DynamicStructuredTool({
 });
 
 /**
+ * Capture screenshot and immediately download it
+ */
+export const captureScreenshotAndDownloadTool = new DynamicStructuredTool({
+  name: "captureScreenshotAndDownload",
+  description:
+    "Capture a screenshot of the current viewport and immediately save it to downloads. This is more efficient than using captureScreenshot followed by downloadFile. The screenshot will also be shown in the chat. Use this when the user asks to 'take a screenshot' or 'save a screenshot'.",
+  schema: z.object({
+    filename: z
+      .string()
+      .optional()
+      .default("screenshot.png")
+      .describe(
+        "The filename to save as (default: 'screenshot.png'). Must include .png extension.",
+      ),
+  }),
+  func: async ({ filename }): Promise<string> => {
+    const response = await sendToolMessage<ScreenshotAndDownloadResult>(
+      ToolName.CAPTURE_SCREENSHOT_AND_DOWNLOAD,
+      { filename },
+    );
+    // Return the full data object so it can be displayed in chat
+    return JSON.stringify(response.data, null, 2);
+  },
+});
+
+/**
+ * Download a file from a URL (including data URLs)
+ */
+export const downloadFileTool = new DynamicStructuredTool({
+  name: "downloadFile",
+  description:
+    "Download a file from a URL or data URL. Useful for downloading images, PDFs, or any file from the web. The file will be saved to the user's default downloads folder. Note: For screenshots, use captureScreenshotAndDownload instead.",
+  schema: z.object({
+    url: z
+      .string()
+      .describe(
+        "The URL or data URL of the file to download (e.g., 'https://example.com/file.pdf' or 'data:image/png;base64,...')",
+      ),
+    filename: z
+      .string()
+      .describe(
+        "The filename to save as, including extension (e.g., 'document.pdf', 'image.jpg')",
+      ),
+  }),
+  func: async ({ url, filename }): Promise<string> => {
+    const response = await sendToolMessage<DownloadResult>(
+      ToolName.DOWNLOAD_FILE,
+      { url, filename },
+    );
+    return JSON.stringify(response.data, null, 2);
+  },
+});
+
+/**
  * Array of all browser tools for easy import
  */
 export const browserTools = [
@@ -208,6 +273,8 @@ export const browserTools = [
   fillInputTool,
   scrollToElementTool,
   captureScreenshotTool,
+  captureScreenshotAndDownloadTool,
   getAllTabsTool,
   switchToTabTool,
+  downloadFileTool,
 ];

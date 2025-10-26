@@ -459,7 +459,7 @@ export const graph = new StateGraph(MessagesAnnotation)
 export async function* streamChat(
   messages: BaseMessage[],
 ): AsyncGenerator<
-  { type: string; content: string; delta?: string },
+  { type: string; content: string; delta?: string; toolResult?: string },
   void,
   unknown
 > {
@@ -538,9 +538,17 @@ export async function* streamChat(
         const toolMessages = data.tools.messages;
         if (toolMessages && toolMessages.length > 0) {
           const toolNames = toolMessages.map((msg: any) => msg.name).join(", ");
+          // Get the last tool result content for image display
+          const lastToolMessage = toolMessages[toolMessages.length - 1];
+          const toolResult = lastToolMessage?.content || "";
+          console.log(
+            "[LangGraph] Tool complete - toolResult:",
+            toolResult?.substring(0, 200),
+          );
           yield {
             type: "tool_complete",
             content: `Completed: ${toolNames}`,
+            toolResult: toolResult,
           };
         }
       }

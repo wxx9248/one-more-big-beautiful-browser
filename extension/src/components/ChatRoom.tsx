@@ -15,6 +15,7 @@ interface Message {
   isStreaming?: boolean;
   isCollapsible?: boolean;
   isExpanded?: boolean;
+  imageUrl?: string; // For displaying screenshots
 }
 
 interface ChatRoomProps {
@@ -196,6 +197,49 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
             );
             currentToolMessageId = null;
           }
+
+          // Check if the tool result contains an image (screenshot)
+          try {
+            console.log("[ChatRoom] Raw toolResult:", chunk.toolResult);
+            if (!chunk.toolResult) {
+              console.warn("[ChatRoom] No toolResult in chunk");
+              return;
+            }
+
+            const toolResult = JSON.parse(chunk.toolResult);
+            console.log("[ChatRoom] Parsed toolResult:", toolResult);
+
+            if (
+              toolResult?.dataUrl &&
+              toolResult.dataUrl.startsWith("data:image")
+            ) {
+              console.log(
+                "[ChatRoom] Found image dataUrl, creating screenshot message",
+              );
+              // Display the screenshot in chat
+              const screenshotMessageId = `${Date.now()}-screenshot`;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: screenshotMessageId,
+                  sender: "System",
+                  content: toolResult.message || "Screenshot captured",
+                  timestamp: new Date(),
+                  imageUrl: toolResult.dataUrl,
+                },
+              ]);
+            } else {
+              console.log(
+                "[ChatRoom] No dataUrl found in toolResult or not an image",
+              );
+            }
+          } catch (e) {
+            console.error(
+              "[ChatRoom] Failed to parse tool result for image display:",
+              e,
+            );
+            console.error("[ChatRoom] Raw chunk.toolResult:", chunk.toolResult);
+          }
         } else if (chunk.type === "complete") {
           // Streaming complete, mark as finished
           setMessages((prev) =>
@@ -274,8 +318,29 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                   </div>
                 )}
               </div>
+            ) : message.imageUrl ? (
+              // System messages with images - render as card to show image
+              <Card key={message.id} className="max-w-[80%] mr-auto">
+                <div className="p-3 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold">
+                      {message.sender}
+                    </span>
+                    <span className="text-xs opacity-70">
+                      {message.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p className="text-sm">{message.content}</p>
+                  <img
+                    src={message.imageUrl}
+                    alt="Screenshot"
+                    className="mt-2 rounded border max-w-full h-auto"
+                    style={{ maxHeight: "300px" }}
+                  />
+                </div>
+              </Card>
             ) : (
-              // System messages - simple text without card
+              // System messages without images - simple text
               <div
                 key={message.id}
                 className="flex items-center gap-2 text-muted-foreground text-xs py-1"
@@ -311,6 +376,14 @@ export function ChatRoom({ onLogout }: ChatRoomProps) {
                     <span className="animate-pulse ml-1">|</span>
                   )}
                 </p>
+                {message.imageUrl && (
+                  <img
+                    src={message.imageUrl}
+                    alt="Screenshot"
+                    className="mt-2 rounded border max-w-full h-auto"
+                    style={{ maxHeight: "300px" }}
+                  />
+                )}
               </div>
             </Card>
           ),

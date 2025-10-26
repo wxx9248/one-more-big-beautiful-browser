@@ -195,6 +195,35 @@ async function handleToolCall(
       return;
     }
 
+    // Special handling for screenshot capture and download
+    if (toolName === "captureScreenshotAndDownload") {
+      const result = await captureScreenshotAndDownload(
+        message.params.filename || "screenshot.png",
+      );
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
+    // Special handling for file downloads
+    if (toolName === "downloadFile") {
+      const result = await downloadFile(
+        message.params.url,
+        message.params.filename,
+      );
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
     // Get active tab
     const tabs = await browser.tabs.query({
       active: true,
@@ -284,6 +313,81 @@ async function switchToTab(
     return {
       success: false,
       message: `Failed to switch tab: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Capture screenshot and immediately download it
+ */
+async function captureScreenshotAndDownload(filename: string): Promise<{
+  success: boolean;
+  message: string;
+  filename: string;
+  dataUrl: string;
+  timestamp: number;
+}> {
+  try {
+    // Capture the screenshot
+    const screenshot = await captureScreenshot();
+
+    // Download it
+    const downloadResult = await downloadFile(screenshot.dataUrl, filename);
+
+    if (!downloadResult.success) {
+      throw new Error(downloadResult.message);
+    }
+
+    return {
+      success: true,
+      message: `Screenshot saved as ${filename}`,
+      filename: filename,
+      dataUrl: screenshot.dataUrl,
+      timestamp: screenshot.timestamp,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `Failed to capture and download screenshot: ${error.message}`,
+      filename: filename,
+      dataUrl: "",
+      timestamp: Date.now(),
+    };
+  }
+}
+
+/**
+ * Download a file from a URL or data URL
+ */
+async function downloadFile(
+  url: string,
+  filename: string,
+): Promise<{ success: boolean; message: string; filename: string }> {
+  try {
+    console.log(
+      `[Background] Downloading file: ${filename} from ${url.substring(0, 100)}...`,
+    );
+
+    // Chrome's downloads API can handle data URLs directly
+    const downloadId = await browser.downloads.download({
+      url: url,
+      filename: filename,
+      saveAs: false,
+    });
+
+    console.log(`[Background] Download initiated with ID: ${downloadId}`);
+
+    return {
+      success: true,
+      message: `File downloaded successfully: ${filename}`,
+      filename: filename,
+    };
+  } catch (error: any) {
+    console.error(`[Background] Download failed:`, error);
+    return {
+      success: false,
+      message: `Failed to download file: ${error.message}`,
+      filename: filename,
     };
   }
 }

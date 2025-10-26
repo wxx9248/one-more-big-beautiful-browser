@@ -62,6 +62,20 @@ export interface ScrollResult {
   elementFound: boolean;
 }
 
+export interface DownloadResult {
+  success: boolean;
+  message: string;
+  filename: string;
+}
+
+export interface ScreenshotAndDownloadResult {
+  success: boolean;
+  message: string;
+  filename: string;
+  dataUrl: string; // For displaying in chat
+  timestamp: number;
+}
+
 /**
  * Tool names enum for type safety
  */
@@ -73,6 +87,8 @@ export enum ToolName {
   FILL_INPUT = "fillInput",
   SCROLL_TO_ELEMENT = "scrollToElement",
   CAPTURE_SCREENSHOT = "captureScreenshot",
+  CAPTURE_SCREENSHOT_AND_DOWNLOAD = "captureScreenshotAndDownload",
   GET_ALL_TABS = "getAllTabs",
   SWITCH_TO_TAB = "switchToTab",
+  DOWNLOAD_FILE = "downloadFile",
 }
