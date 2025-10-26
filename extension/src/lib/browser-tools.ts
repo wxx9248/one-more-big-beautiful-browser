@@ -16,6 +16,7 @@ import type {
   ScreenshotData,
   DownloadResult,
   ScreenshotAndDownloadResult,
+  OpenNewTabResult,
 } from "@/src/types/tools";
 import { ToolName } from "@/src/types/tools";
 
@@ -263,6 +264,29 @@ export const downloadFileTool = new DynamicStructuredTool({
 });
 
 /**
+ * Open a new tab with a specified URL
+ */
+export const openNewTabTool = new DynamicStructuredTool({
+  name: "openNewTab",
+  description:
+    "Open a new browser tab with the specified URL. Use this when the user asks to open a website or navigate to a URL in a new tab. The new tab will become the active tab.",
+  schema: z.object({
+    url: z
+      .string()
+      .describe(
+        "The URL to open in the new tab (e.g., 'https://www.example.com', 'https://github.com')",
+      ),
+  }),
+  func: async ({ url }): Promise<string> => {
+    const response = await sendToolMessage<OpenNewTabResult>(
+      ToolName.OPEN_NEW_TAB,
+      { url },
+    );
+    return JSON.stringify(response.data, null, 2);
+  },
+});
+
+/**
  * Array of all browser tools for easy import
  */
 export const browserTools = [
@@ -277,4 +301,5 @@ export const browserTools = [
   getAllTabsTool,
   switchToTabTool,
   downloadFileTool,
+  openNewTabTool,
 ];

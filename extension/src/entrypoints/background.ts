@@ -224,6 +224,18 @@ async function handleToolCall(
       return;
     }
 
+    // Special handling for opening new tabs
+    if (toolName === "openNewTab") {
+      const result = await openNewTab(message.params.url);
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
     // Get active tab
     const tabs = await browser.tabs.query({
       active: true,
@@ -388,6 +400,48 @@ async function downloadFile(
       success: false,
       message: `Failed to download file: ${error.message}`,
       filename: filename,
+    };
+  }
+}
+
+/**
+ * Open a new tab with the specified URL
+ */
+async function openNewTab(url: string): Promise<{
+  success: boolean;
+  message: string;
+  tabId?: number;
+  url: string;
+}> {
+  try {
+    console.log(`[Background] Opening new tab with URL: ${url}`);
+
+    // Validate URL format
+    let fullUrl = url;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      fullUrl = `https://${url}`;
+    }
+
+    // Create new tab
+    const tab = await browser.tabs.create({
+      url: fullUrl,
+      active: true, // Make the new tab active
+    });
+
+    console.log(`[Background] New tab created with ID: ${tab.id}`);
+
+    return {
+      success: true,
+      message: `Opened new tab: ${fullUrl}`,
+      tabId: tab.id,
+      url: fullUrl,
+    };
+  } catch (error: any) {
+    console.error(`[Background] Failed to open new tab:`, error);
+    return {
+      success: false,
+      message: `Failed to open new tab: ${error.message}`,
+      url: url,
     };
   }
 }

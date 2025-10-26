@@ -76,6 +76,13 @@ export interface ScreenshotAndDownloadResult {
   timestamp: number;
 }
 
+export interface OpenNewTabResult {
+  success: boolean;
+  message: string;
+  tabId?: number;
+  url: string;
+}
+
 /**
  * Tool names enum for type safety
  */
@@ -91,4 +98,5 @@ export enum ToolName {
   GET_ALL_TABS = "getAllTabs",
   SWITCH_TO_TAB = "switchToTab",
   DOWNLOAD_FILE = "downloadFile",
+  OPEN_NEW_TAB = "openNewTab",
 }
