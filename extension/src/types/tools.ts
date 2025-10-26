@@ -62,18 +62,41 @@ export interface ScrollResult {
   elementFound: boolean;
 }
 
+export interface DownloadResult {
+  success: boolean;
+  message: string;
+  filename: string;
+}
+
+export interface ScreenshotAndDownloadResult {
+  success: boolean;
+  message: string;
+  filename: string;
+  dataUrl: string; // For displaying in chat
+  timestamp: number;
+}
+
+export interface OpenNewTabResult {
+  success: boolean;
+  message: string;
+  tabId?: number;
+  url: string;
+}
+
 /**
  * Tool names enum for type safety
- * Note: These must match the tool names defined in browser-tools.ts
  */
 export enum ToolName {
-  GET_CURRENT_TAB_INFO = "get_current_tab_info",
-  GET_PAGE_CONTENT = "get_page_content",
-  FIND_ELEMENTS = "find_elements",
-  CLICK_ELEMENT = "click_element",
-  FILL_INPUT = "fill_input",
-  SCROLL_TO_ELEMENT = "scroll_to_element",
-  CAPTURE_SCREENSHOT = "capture_screenshot",
-  GET_ALL_TABS = "get_all_tabs",
-  SWITCH_TO_TAB = "switch_to_tab",
+  GET_CURRENT_TAB_INFO = "getCurrentTabInfo",
+  GET_PAGE_CONTENT = "getPageContent",
+  FIND_ELEMENTS = "findElements",
+  CLICK_ELEMENT = "clickElement",
+  FILL_INPUT = "fillInput",
+  SCROLL_TO_ELEMENT = "scrollToElement",
+  CAPTURE_SCREENSHOT = "captureScreenshot",
+  CAPTURE_SCREENSHOT_AND_DOWNLOAD = "captureScreenshotAndDownload",
+  GET_ALL_TABS = "getAllTabs",
+  SWITCH_TO_TAB = "switchToTab",
+  DOWNLOAD_FILE = "downloadFile",
+  OPEN_NEW_TAB = "openNewTab",
 }

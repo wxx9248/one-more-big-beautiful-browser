@@ -1,6 +1,6 @@
 /**
- * LangGraph integration for browser extension
- * Implements an agentic loop: LLM → Tool → LLM
+ * LangGraph integration for browser extension using Anthropic
+ * Implements an agentic loop: LLM → Tool → LLM with native Anthropic tool calling
  */
 
 import {
@@ -9,67 +9,202 @@ import {
   START,
   END,
 } from "@langchain/langgraph/web";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
 import type { BaseMessage } from "@langchain/core/messages";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { browserTools } from "./browser-tools";
 import { getAuthToken } from "./tool-messenger";
 import { BACKEND_API_URL } from "@/src/config/env";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 
 /**
- * Parse SSE (Server-Sent Events) stream from backend
- * Backend returns tokens in format: data: {"token": "Hello"}
+ * Convert LangChain tools to Anthropic tool format
  */
-async function parseSSEStream(response: Response): Promise<string> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("No response body");
-  }
+function convertToAnthropicTools(tools: StructuredToolInterface[]): Array<{
+  name: string;
+  description: string;
+  input_schema: any;
+}> {
+  return tools.map((tool) => {
+    // Get the Zod schema and convert it to JSON schema format
+    const schema = tool.schema as any;
+    const properties: Record<string, any> = {};
+    const required: string[] = [];
 
-  const decoder = new TextDecoder();
-  let fullText = "";
+    // Extract properties from Zod schema
+    if (schema && schema._def) {
+      // In Zod v4, shape can be either a function or an object
+      const shape =
+        typeof schema._def.shape === "function"
+          ? schema._def.shape()
+          : schema._def.shape;
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      if (shape && typeof shape === "object") {
+        for (const [key, value] of Object.entries(shape)) {
+          const zodField = value as any;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n");
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-
-          // Check for end marker
-          if (data === "[DONE]") {
-            return fullText;
+          // Determine type
+          let type = "string";
+          if (zodField._def) {
+            const typeName = zodField._def.typeName;
+            if (typeName === "ZodString") type = "string";
+            else if (typeName === "ZodNumber") type = "number";
+            else if (typeName === "ZodBoolean") type = "boolean";
+            else if (typeName === "ZodOptional") {
+              // Handle optional fields
+              const innerType = zodField._def.innerType?._def?.typeName;
+              if (innerType === "ZodString") type = "string";
+              else if (innerType === "ZodNumber") type = "number";
+              else if (innerType === "ZodBoolean") type = "boolean";
+            } else if (typeName === "ZodDefault") {
+              // Handle default fields
+              const innerType = zodField._def.innerType?._def?.typeName;
+              if (innerType === "ZodString") type = "string";
+              else if (innerType === "ZodNumber") type = "number";
+              else if (innerType === "ZodBoolean") type = "boolean";
+            }
           }
 
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.token) {
-              fullText += parsed.token;
-            }
-          } catch (e) {
-            // Skip invalid JSON lines
-            console.warn("Failed to parse SSE line:", data);
+          properties[key] = {
+            type,
+            description:
+              zodField._def?.description || zodField.description || "",
+          };
+
+          // Check if field is required (not optional and not default)
+          const typeName = zodField._def?.typeName;
+          if (
+            typeName &&
+            !typeName.includes("Optional") &&
+            !typeName.includes("Default")
+          ) {
+            required.push(key);
           }
         }
       }
     }
-  } finally {
-    reader.releaseLock();
-  }
 
-  return fullText;
+    return {
+      name: tool.name,
+      description: tool.description,
+      input_schema: {
+        type: "object",
+        properties,
+        required,
+      },
+    };
+  });
 }
 
 /**
- * LLM Node - Calls backend API for LLM inference
+ * Create a map of tool names to tool instances for easy lookup
+ */
+const toolMap = new Map(browserTools.map((tool) => [tool.name, tool]));
+
+/**
+ * Convert LangChain messages to Anthropic format
+ */
+function convertToAnthropicMessages(
+  messages: BaseMessage[],
+): Array<{ role: string; content: any }> {
+  const anthropicMessages: Array<{ role: string; content: any }> = [];
+
+  for (const msg of messages) {
+    if (msg instanceof HumanMessage) {
+      anthropicMessages.push({
+        role: "user",
+        content:
+          typeof msg.content === "string" ? msg.content : String(msg.content),
+      });
+    } else if (msg instanceof AIMessage) {
+      // Handle AI messages with tool calls
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        const content: any[] = [];
+
+        // Add text content if present
+        if (msg.content) {
+          content.push({
+            type: "text",
+            text:
+              typeof msg.content === "string"
+                ? msg.content
+                : String(msg.content),
+          });
+        }
+
+        // Add tool use blocks
+        for (const toolCall of msg.tool_calls) {
+          content.push({
+            type: "tool_use",
+            id: toolCall.id || `call_${Date.now()}`,
+            name: toolCall.name,
+            input: toolCall.args || {},
+          });
+        }
+
+        anthropicMessages.push({
+          role: "assistant",
+          content,
+        });
+      } else {
+        // Regular AI message without tool calls
+        anthropicMessages.push({
+          role: "assistant",
+          content:
+            typeof msg.content === "string" ? msg.content : String(msg.content),
+        });
+      }
+    } else if (msg instanceof ToolMessage) {
+      // Tool result - Anthropic expects these as user messages with tool_result type
+      // Check if content is multimodal (array with image blocks)
+      if (
+        Array.isArray(msg.content) &&
+        msg.content.some(
+          (item: any) => item.type === "image" || item.type === "image_url",
+        )
+      ) {
+        // For multimodal content (like images from analyzeScreenshot),
+        // Anthropic requires tool_result wrapper, and content can be an array of blocks
+        console.log(
+          "[LangGraph] Converting multimodal ToolMessage to tool_result with content blocks",
+        );
+        anthropicMessages.push({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id || msg.name || "unknown",
+              content: msg.content, // Content is an array of text/image blocks
+            },
+          ],
+        });
+      } else {
+        // Regular tool result
+        anthropicMessages.push({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id || msg.name || "unknown",
+              content:
+                typeof msg.content === "string"
+                  ? msg.content
+                  : JSON.stringify(msg.content),
+            },
+          ],
+        });
+      }
+    }
+  }
+
+  return anthropicMessages;
+}
+
+/**
+ * LLM Node - Calls web API with streaming and emits tokens via config.writer
  */
 async function llmNode(
   state: typeof MessagesAnnotation.State,
+  config?: { writer?: (chunk: string) => void },
 ): Promise<{ messages: BaseMessage[] }> {
   const messages = state.messages;
 
@@ -80,46 +215,16 @@ async function llmNode(
       throw new Error("No auth token available");
     }
 
-    // Convert messages to backend format
-    const formattedMessages = messages.map((msg) => {
-      if (msg instanceof HumanMessage) {
-        return { role: "user", content: msg.content };
-      } else if (msg instanceof AIMessage) {
-        return { role: "assistant", content: msg.content };
-      } else if (msg instanceof ToolMessage) {
-        // Tool results are sent as system messages
-        return { role: "system", content: `Tool result: ${msg.content}` };
-      }
-      return { role: "system", content: msg.content };
-    });
+    // Convert messages to Anthropic format
+    const anthropicMessages = convertToAnthropicMessages(messages);
 
-    // Add system message about available tools
-    const systemMessage = {
-      role: "system",
-      content: `You are a helpful AI assistant with access to browser automation tools. You can:
-- Get information about the current page (get_current_tab_info, get_page_content)
-- Find and interact with elements (find_elements, click_element, fill_input, scroll_to_element)
-- Manage tabs (get_all_tabs, switch_to_tab)
-- Capture screenshots (capture_screenshot)
+    console.log("[LangGraph] Calling Anthropic streaming API via web proxy");
+    console.log("[LangGraph] Message count:", anthropicMessages.length);
 
-When the user asks you to interact with a page, use the appropriate tools. Always get page content or find elements before trying to click or fill them.
+    // Convert LangChain tools to Anthropic format
+    const anthropicTools = convertToAnthropicTools(browserTools);
 
-To use a tool, respond with a tool call in this format:
-TOOL_CALL: tool_name
-PARAMS: {"param1": "value1", "param2": "value2"}
-
-Example:
-TOOL_CALL: get_page_content
-PARAMS: {}
-
-Or:
-TOOL_CALL: click_element
-PARAMS: {"selector": "button.submit"}
-
-After seeing tool results, provide a natural response to the user.`,
-    };
-
-    // Call backend API with streaming
+    // Call web API with streaming (which will add API key and forward to Anthropic)
     const response = await fetch(BACKEND_API_URL, {
       method: "POST",
       headers: {
@@ -127,34 +232,144 @@ After seeing tool results, provide a natural response to the user.`,
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        messages: [systemMessage, ...formattedMessages],
+        messages: anthropicMessages,
+        model: "claude-sonnet-4-5",
+        max_tokens: 4096,
+        temperature: 1,
+        tools: anthropicTools,
+        stream: true,
+        system: `You are a helpful AI assistant with access to browser automation tools. You can interact with web pages by:
+- Getting information about the current page (getCurrentTabInfo, getPageContent)
+- Finding and interacting with elements (findElements, clickElement, fillInput, scrollToElement)
+- Managing tabs (getAllTabs, switchToTab)
+- Capturing screenshots (captureScreenshot)
+
+When the user asks you to interact with a page, use the appropriate tools. Always get page content or find elements before trying to click or fill them. Be proactive and helpful.`,
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`Web API error: ${response.status} - ${errorText}`);
     }
 
-    // Parse SSE stream
-    const aiResponse = await parseSSEStream(response);
+    if (!response.body) {
+      throw new Error("No response body");
+    }
 
-    // Parse tool calls from LLM response
-    const toolCalls = parseToolCalls(aiResponse);
+    // Process streaming response
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let textContent = "";
+    const toolCalls: Array<{
+      name: string;
+      args: Record<string, any>;
+      id: string;
+    }> = [];
+    let currentToolCall: any = null;
 
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") continue;
+
+            try {
+              const event = JSON.parse(data);
+
+              if (event.type === "content_block_start") {
+                if (event.content_block?.type === "text") {
+                  // Text block started
+                } else if (event.content_block?.type === "tool_use") {
+                  currentToolCall = {
+                    name: event.content_block.name,
+                    id: event.content_block.id,
+                    args: {},
+                  };
+                }
+              } else if (event.type === "content_block_delta") {
+                if (event.delta?.type === "text_delta") {
+                  const delta = event.delta.text;
+                  textContent += delta;
+                  // Stream token using config.writer
+                  if (config?.writer) {
+                    config.writer(delta);
+                  }
+                } else if (
+                  event.delta?.type === "input_json_delta" &&
+                  currentToolCall
+                ) {
+                  // Accumulate tool input JSON
+                  if (!currentToolCall.inputJson) {
+                    currentToolCall.inputJson = "";
+                  }
+                  currentToolCall.inputJson += event.delta.partial_json;
+                }
+              } else if (event.type === "content_block_stop") {
+                if (currentToolCall) {
+                  // Parse accumulated JSON input
+                  if (currentToolCall.inputJson) {
+                    try {
+                      currentToolCall.args = JSON.parse(
+                        currentToolCall.inputJson,
+                      );
+                    } catch (e) {
+                      console.warn(
+                        "Failed to parse tool input:",
+                        currentToolCall.inputJson,
+                      );
+                    }
+                  }
+                  toolCalls.push({
+                    name: currentToolCall.name,
+                    id: currentToolCall.id,
+                    args: currentToolCall.args,
+                  });
+                  currentToolCall = null;
+                }
+              } else if (event.type === "error") {
+                throw new Error(event.error || "Stream error");
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message.includes("Stream error")) {
+                throw e;
+              }
+              console.warn("Failed to parse SSE event:", data);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    // Create AI message with tool calls if present
     if (toolCalls.length > 0) {
-      // LLM wants to use tools
+      console.log(
+        "[LangGraph] Tool calls detected:",
+        toolCalls.map((tc) => tc.name),
+      );
       return {
         messages: [
           new AIMessage({
-            content: aiResponse,
+            content: textContent || "Using tools...",
             tool_calls: toolCalls,
           }),
         ],
       };
     } else {
-      // No tool calls, just a regular response
+      // No tool calls, just return text response
       return {
-        messages: [new AIMessage(aiResponse)],
+        messages: [new AIMessage(textContent || "I'm here to help!")],
       };
     }
   } catch (error: any) {
@@ -170,42 +385,88 @@ After seeing tool results, provide a natural response to the user.`,
 }
 
 /**
- * Parse tool calls from LLM response
- * Looks for TOOL_CALL and PARAMS markers
+ * Execute a single tool call using browser-tools
  */
-function parseToolCalls(response: string): Array<{
-  name: string;
-  args: Record<string, any>;
-  id: string;
-}> {
-  const toolCalls: Array<{
-    name: string;
-    args: Record<string, any>;
-    id: string;
-  }> = [];
-
-  // Simple regex-based parsing
-  const toolCallPattern = /TOOL_CALL:\s*(\w+)\s*PARAMS:\s*({[^}]*})/gs;
-  let match;
-
-  while ((match = toolCallPattern.exec(response)) !== null) {
-    const toolName = match[1];
-    let params = {};
-
-    try {
-      params = JSON.parse(match[2]);
-    } catch (e) {
-      console.warn(`Failed to parse tool params: ${match[2]}`);
+async function executeToolCall(
+  toolName: string,
+  args: Record<string, any>,
+): Promise<string> {
+  try {
+    const tool = toolMap.get(toolName);
+    if (!tool) {
+      throw new Error(`Unknown tool: ${toolName}`);
     }
 
-    toolCalls.push({
-      name: toolName,
-      args: params,
-      id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    console.log(`[LangGraph] Executing tool: ${toolName}`, args);
+
+    // Execute the tool directly using its invoke method
+    // Cast to any to avoid type issues with different tool signatures
+    const result = await (tool as any).invoke(args);
+
+    // Return the result (already formatted as string by the tool)
+    return typeof result === "string" ? result : JSON.stringify(result);
+  } catch (error: any) {
+    console.error(`[LangGraph] Tool execution error (${toolName}):`, error);
+    return JSON.stringify({
+      error: error.message || "Tool execution failed",
+      toolName,
     });
   }
+}
 
-  return toolCalls;
+/**
+ * Tool Node - Executes browser tools
+ */
+async function toolNode(
+  state: typeof MessagesAnnotation.State,
+): Promise<{ messages: BaseMessage[] }> {
+  const lastMessage = state.messages[state.messages.length - 1];
+
+  if (!(lastMessage instanceof AIMessage) || !lastMessage.tool_calls?.length) {
+    console.warn("[LangGraph] Tool node called but no tool calls found");
+    return { messages: [] };
+  }
+
+  const toolMessages: ToolMessage[] = [];
+
+  // Execute all tool calls
+  for (const toolCall of lastMessage.tool_calls) {
+    const result = await executeToolCall(toolCall.name, toolCall.args || {});
+
+    // Try to parse result as multimodal content (images, etc.)
+    let content: string | Array<any> = result;
+    try {
+      const parsed = JSON.parse(result);
+      // Check if it's an array of content blocks (multimodal format)
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        parsed.some(
+          (item) =>
+            item.type === "image" ||
+            item.type === "image_url" ||
+            item.type === "text",
+        )
+      ) {
+        content = parsed;
+        console.log(
+          `[LangGraph] Tool ${toolCall.name} returned multimodal content with ${parsed.length} blocks`,
+        );
+      }
+    } catch (e) {
+      // Not JSON or not multimodal format, keep as string
+    }
+
+    toolMessages.push(
+      new ToolMessage({
+        content: content,
+        tool_call_id: toolCall.id || toolCall.name,
+        name: toolCall.name,
+      }),
+    );
+  }
+
+  return { messages: toolMessages };
 }
 
 /**
@@ -227,11 +488,6 @@ function shouldContinue(
 }
 
 /**
- * Create tool node with browser tools
- */
-const toolNode = new ToolNode(browserTools);
-
-/**
  * Build and compile the graph
  */
 export const graph = new StateGraph(MessagesAnnotation)
@@ -246,538 +502,124 @@ export const graph = new StateGraph(MessagesAnnotation)
   .compile();
 
 /**
- * Helper function to invoke the graph with a user message
+ * Stream chat using LangGraph with token-level streaming
+ * Uses custom stream mode to receive tokens from llmNode in real-time
  */
-export async function invokeGraph(userMessage: string): Promise<string> {
-  const result = await graph.invoke({
-    messages: [new HumanMessage(userMessage)],
-  });
-
-  const lastMessage = result.messages[result.messages.length - 1];
-  return lastMessage.content as string;
-}
-
-/**
- * Helper to stream next response in recursive tool calling
- */
-async function* streamNextResponse(
-  messages: any[],
-  toolName: string,
-  toolResult: string,
-): AsyncGenerator<{ type: string; content: string }, void, unknown> {
-  const token = await getAuthToken();
-  if (!token) {
-    throw new Error("No auth token available");
-  }
-
-  console.log("[streamNextResponse] Sending request with conversation history");
-
-  const response = await fetch(BACKEND_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ messages }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend API error: ${response.status}`);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("No response body");
-  }
-
-  const decoder = new TextDecoder();
+export async function* streamChat(
+  messages: BaseMessage[],
+): AsyncGenerator<
+  { type: string; content: string; delta?: string; toolResult?: string },
+  void,
+  unknown
+> {
   let fullText = "";
+  let llmCallCount = 0;
+  let currentLLMText = "";
+  let isFirstLLMCall = true;
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n");
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-
-          if (data === "[DONE]") {
-            yield {
-              type: "llm_followup",
-              content: fullText,
-            };
-
-            // Check for more tool calls recursively
-            const nextToolCalls = parseToolCalls(fullText);
-            if (nextToolCalls.length > 0) {
-              for (const toolCall of nextToolCalls) {
-                console.log(
-                  `[streamNextResponse] Executing tool: ${toolCall.name}`,
-                );
-
-                yield {
-                  type: "tool_call",
-                  content: JSON.stringify({
-                    name: toolCall.name,
-                    args: toolCall.args,
-                  }),
-                };
-
-                const tool = browserTools.find((t) => t.name === toolCall.name);
-                if (tool) {
-                  try {
-                    const result = await tool.func(toolCall.args as any);
-                    yield {
-                      type: "tool_result",
-                      content: JSON.stringify({
-                        name: toolCall.name,
-                        result: result,
-                      }),
-                    };
-
-                    const updatedMessages = [
-                      ...messages,
-                      { role: "assistant", content: fullText },
-                      {
-                        role: "user",
-                        content: `The tool "${toolCall.name}" returned:\n\n${result}\n\nBased on this, provide a response or call another tool if needed.`,
-                      },
-                    ];
-
-                    yield* streamNextResponse(
-                      updatedMessages,
-                      toolCall.name,
-                      result,
-                    );
-                  } catch (error: any) {
-                    yield {
-                      type: "tool_error",
-                      content: JSON.stringify({
-                        name: toolCall.name,
-                        error: error.message,
-                      }),
-                    };
-                  }
-                }
-              }
-            }
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.token) {
-              fullText += parsed.token;
-              yield {
-                type: "llm_followup",
-                content: fullText,
-              };
-            }
-          } catch (e) {
-            console.warn(
-              "[streamNextResponse] Failed to parse SSE line:",
-              data,
-            );
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-/**
- * Stream follow-up LLM response after tool execution
- */
-async function* streamWithToolResults(
-  originalUserMessage: string,
-  assistantResponse: string,
-  toolName: string,
-  toolResult: string,
-  systemMessage: any,
-): AsyncGenerator<{ type: string; content: string }, void, unknown> {
-  const token = await getAuthToken();
-  if (!token) {
-    throw new Error("No auth token available");
-  }
-
-  // Build conversation with tool results
-  // Note: Don't send multiple system messages - include tool result in user context
-  const messages = [
-    systemMessage,
-    { role: "user", content: originalUserMessage },
-    { role: "assistant", content: assistantResponse },
-    {
-      role: "user",
-      content: `The tool "${toolName}" returned the following result:\n\n${toolResult}\n\nBased on this information, either provide a natural response to the user, or if you need more information, you can call another tool.`,
-    },
-  ];
-
-  console.log("[streamWithToolResults] Sending request to backend:", {
-    messagesCount: messages.length,
-    lastMessage: messages[messages.length - 1],
-  });
-
-  const response = await fetch(BACKEND_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ messages }),
-  });
-
-  console.log(
-    `[streamWithToolResults] Backend response status: ${response.status}`,
+  // Use multiple stream modes: custom for tokens, updates for node results
+  const stream = await graph.stream(
+    { messages },
+    { streamMode: ["custom", "updates"] as any },
   );
 
-  if (!response.ok) {
-    throw new Error(`Backend API error: ${response.status}`);
-  }
+  for await (const chunk of stream) {
+    // chunk is a tuple: [mode, data]
+    const [mode, data] = chunk as [string, any];
 
-  // Stream the follow-up response
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("No response body");
-  }
+    if (mode === "custom") {
+      // Token from llmNode via config.writer
+      const token = data as string;
+      fullText += token;
+      currentLLMText += token;
 
-  const decoder = new TextDecoder();
-  let fullText = "";
-  let chunkCount = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        console.log(
-          `[streamWithToolResults] Stream ended after ${chunkCount} chunks`,
-        );
-        break;
+      if (isFirstLLMCall) {
+        // First LLM call - stream normally
+        yield {
+          type: "token",
+          content: fullText,
+          delta: token,
+        };
       }
+    } else if (mode === "updates") {
+      // Node completion
+      if (data.llm) {
+        // LLM node completed - check for tool calls
+        const messages = data.llm.messages;
+        if (messages && messages.length > 0) {
+          const message = messages[0] as AIMessage;
+          llmCallCount++;
 
-      chunkCount++;
-      const chunk = decoder.decode(value, { stream: true });
-      console.log(
-        `[streamWithToolResults] Received chunk ${chunkCount}:`,
-        chunk,
-      );
+          if (message.tool_calls && message.tool_calls.length > 0) {
+            // Tool calls detected
+            const toolNames = message.tool_calls
+              .map((tc) => tc.name)
+              .join(", ");
 
-      const lines = chunk.split("\n");
+            // If this is not the first LLM call and there's text, send as intermediate
+            if (!isFirstLLMCall && currentLLMText) {
+              yield {
+                type: "intermediate_text",
+                content: currentLLMText,
+              };
+            }
 
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-
-          if (data === "[DONE]") {
-            console.log(
-              `[streamWithToolResults] Stream complete, total text length: ${fullText.length}`,
-            );
             yield {
-              type: "llm_followup",
-              content: fullText,
+              type: "tool_start",
+              content: `Using tools: ${toolNames}`,
             };
 
-            // Check if the follow-up response contains more tool calls
-            const followupToolCalls = parseToolCalls(fullText);
-            console.log(
-              `[streamWithToolResults] Parsed ${followupToolCalls.length} tool calls from follow-up`,
-            );
-
-            if (followupToolCalls.length > 0) {
-              // Recursively execute tool calls
-              for (const toolCall of followupToolCalls) {
-                console.log(
-                  `[streamWithToolResults] Executing follow-up tool: ${toolCall.name}`,
-                  toolCall.args,
-                );
-
-                yield {
-                  type: "tool_call",
-                  content: JSON.stringify({
-                    name: toolCall.name,
-                    args: toolCall.args,
-                  }),
-                };
-
-                const tool = browserTools.find((t) => t.name === toolCall.name);
-                if (tool) {
-                  try {
-                    const nextToolResult = await tool.func(
-                      toolCall.args as any,
-                    );
-                    console.log(
-                      `[streamWithToolResults] Follow-up tool ${toolCall.name} result:`,
-                      nextToolResult,
-                    );
-
-                    yield {
-                      type: "tool_result",
-                      content: JSON.stringify({
-                        name: toolCall.name,
-                        result: nextToolResult,
-                      }),
-                    };
-
-                    // Build updated conversation history
-                    const updatedMessages = [
-                      ...messages,
-                      { role: "assistant", content: fullText },
-                      {
-                        role: "user",
-                        content: `The tool "${toolCall.name}" returned the following result:\n\n${nextToolResult}\n\nBased on this information, either provide a natural response to the user, or if you need more information, you can call another tool.`,
-                      },
-                    ];
-
-                    // Recursively stream the next response
-                    console.log(
-                      `[streamWithToolResults] Recursively streaming next response...`,
-                    );
-                    yield* streamNextResponse(
-                      updatedMessages,
-                      toolCall.name,
-                      nextToolResult,
-                    );
-                  } catch (error: any) {
-                    console.error(
-                      `[streamWithToolResults] Follow-up tool ${toolCall.name} error:`,
-                      error,
-                    );
-                    yield {
-                      type: "tool_error",
-                      content: JSON.stringify({
-                        name: toolCall.name,
-                        error: error.message,
-                      }),
-                    };
-                  }
-                } else {
-                  console.warn(
-                    `[streamWithToolResults] Tool not found: ${toolCall.name}`,
-                  );
-                }
-              }
-            }
-
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.token) {
-              fullText += parsed.token;
-              console.log(
-                `[streamWithToolResults] Token received, total length: ${fullText.length}`,
-              );
+            currentLLMText = "";
+            isFirstLLMCall = false;
+          } else {
+            // No tool calls - this is the final response
+            if (!isFirstLLMCall && currentLLMText) {
+              // This is the last LLM call after tools
               yield {
-                type: "llm_followup",
-                content: fullText,
+                type: "final_text",
+                content: currentLLMText,
               };
-            }
-          } catch (e) {
-            console.warn(
-              "[streamWithToolResults] Failed to parse SSE line:",
-              data,
-            );
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-/**
- * Helper function to stream graph execution with real-time token streaming
- */
-export async function* streamGraph(
-  userMessage: string,
-): AsyncGenerator<{ type: string; content: string }, void, unknown> {
-  try {
-    const token = await getAuthToken();
-    if (!token) {
-      throw new Error("No auth token available");
-    }
-
-    // Initial system message
-    const systemMessage = {
-      role: "system",
-      content: `You are a helpful AI assistant with access to browser automation tools. You can:
-- Get information about the current page (get_current_tab_info, get_page_content)
-- Find and interact with elements (find_elements, click_element, fill_input, scroll_to_element)
-- Manage tabs (get_all_tabs, switch_to_tab)
-- Capture screenshots (capture_screenshot)
-
-When the user asks you to interact with a page, use the appropriate tools. Always get page content or find elements before trying to click or fill them.
-
-To use a tool, respond with a tool call in this format:
-TOOL_CALL: tool_name
-PARAMS: {"param1": "value1", "param2": "value2"}
-
-Example:
-TOOL_CALL: get_page_content
-PARAMS: {}
-
-Or:
-TOOL_CALL: click_element
-PARAMS: {"selector": "button.submit"}
-
-After seeing tool results, provide a natural response to the user.`,
-    };
-
-    // Call backend API
-    const response = await fetch(BACKEND_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        messages: [systemMessage, { role: "user", content: userMessage }],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status}`);
-    }
-
-    // Stream SSE response token by token
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("No response body");
-    }
-
-    const decoder = new TextDecoder();
-    let fullText = "";
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-
-            // Check for end marker
-            if (data === "[DONE]") {
-              // Stream final content
-              yield {
-                type: "llm",
-                content: fullText,
-              };
-
-              // Check for tool calls in complete response
-              const toolCalls = parseToolCalls(fullText);
-              console.log(
-                `[streamGraph] Parsed ${toolCalls.length} tool calls from response`,
-              );
-
-              if (toolCalls.length > 0) {
-                // Execute tools
-                for (const toolCall of toolCalls) {
-                  console.log(
-                    `[streamGraph] Executing tool: ${toolCall.name}`,
-                    toolCall.args,
-                  );
-
-                  yield {
-                    type: "tool_call",
-                    content: JSON.stringify({
-                      name: toolCall.name,
-                      args: toolCall.args,
-                    }),
-                  };
-
-                  // Execute the tool
-                  const tool = browserTools.find(
-                    (t) => t.name === toolCall.name,
-                  );
-                  if (tool) {
-                    try {
-                      const toolResult = await tool.func(toolCall.args as any);
-                      console.log(
-                        `[streamGraph] Tool ${toolCall.name} result:`,
-                        toolResult,
-                      );
-
-                      yield {
-                        type: "tool_result",
-                        content: JSON.stringify({
-                          name: toolCall.name,
-                          result: toolResult,
-                        }),
-                      };
-
-                      // Continue conversation with tool result
-                      console.log(
-                        `[streamGraph] Streaming follow-up response with tool results...`,
-                      );
-                      yield* streamWithToolResults(
-                        userMessage,
-                        fullText,
-                        toolCall.name,
-                        toolResult,
-                        systemMessage,
-                      );
-                      console.log(
-                        `[streamGraph] Follow-up response streaming complete`,
-                      );
-                    } catch (error: any) {
-                      console.error(
-                        `[streamGraph] Tool ${toolCall.name} error:`,
-                        error,
-                      );
-                      yield {
-                        type: "tool_error",
-                        content: JSON.stringify({
-                          name: toolCall.name,
-                          error: error.message,
-                        }),
-                      };
-                    }
-                  } else {
-                    console.warn(
-                      `[streamGraph] Tool not found: ${toolCall.name}`,
-                    );
-                  }
-                }
-              }
-              return;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.token) {
-                fullText += parsed.token;
-                // Yield each token as it arrives
-                yield {
-                  type: "llm",
-                  content: fullText,
-                };
-              }
-            } catch (e) {
-              console.warn("Failed to parse SSE line:", data);
             }
           }
         }
+      } else if (data.tools) {
+        // Tools node completed
+        const toolMessages = data.tools.messages;
+        if (toolMessages && toolMessages.length > 0) {
+          const toolNames = toolMessages.map((msg: any) => msg.name).join(", ");
+          // Get the last tool result content for image display
+          const lastToolMessage = toolMessages[toolMessages.length - 1];
+          const toolResult = lastToolMessage?.content || "";
+
+          // Log toolResult safely (handle both string and array content)
+          const toolResultPreview =
+            typeof toolResult === "string"
+              ? toolResult.substring(0, 200)
+              : Array.isArray(toolResult)
+                ? `[Multimodal content with ${toolResult.length} blocks]`
+                : String(toolResult).substring(0, 200);
+
+          console.log(
+            "[LangGraph] Tool complete - toolResult:",
+            toolResultPreview,
+          );
+
+          yield {
+            type: "tool_complete",
+            content: `Completed: ${toolNames}`,
+            toolResult:
+              typeof toolResult === "string"
+                ? toolResult
+                : JSON.stringify(toolResult),
+          };
+        }
       }
-    } finally {
-      reader.releaseLock();
     }
-  } catch (error: any) {
-    console.error("[LangGraph] Stream error:", error);
-    yield {
-      type: "error",
-      content: error.message || "Unknown error",
-    };
   }
+
+  // Stream complete
+  yield {
+    type: "complete",
+    content: fullText,
+  };
 }

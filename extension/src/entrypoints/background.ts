@@ -3,6 +3,7 @@ import {
   MessageType,
   type AuthMessage,
   type AuthState,
+  AuthSuccessMessage,
 } from "@/src/types/auth";
 import type { ToolMessage, ToolResponse } from "@/src/types/tools";
 
@@ -56,7 +57,7 @@ export default defineBackground(() => {
         case MessageType.AUTH_TOKEN:
         case MessageType.AUTH_SUCCESS:
           // Store the token
-          handleAuthSuccess((message as AuthMessage).token);
+          handleAuthSuccess((message as AuthSuccessMessage).token);
           sendResponse(authState);
           break;
 
@@ -161,7 +162,7 @@ async function handleToolCall(
 
   try {
     // Special handling for screenshot capture
-    if (toolName === "capture_screenshot") {
+    if (toolName === "captureScreenshot") {
       const screenshot = await captureScreenshot();
       sendResponse({
         type: "TOOL_RESPONSE",
@@ -173,7 +174,7 @@ async function handleToolCall(
     }
 
     // Special handling for tab management tools
-    if (toolName === "get_all_tabs") {
+    if (toolName === "getAllTabs") {
       const tabs = await getAllTabs();
       sendResponse({
         type: "TOOL_RESPONSE",
@@ -184,7 +185,7 @@ async function handleToolCall(
       return;
     }
 
-    if (toolName === "switch_to_tab") {
+    if (toolName === "switchToTab") {
       const result = await switchToTab(message.params.tabId);
       sendResponse({
         type: "TOOL_RESPONSE",
@@ -195,17 +196,52 @@ async function handleToolCall(
       return;
     }
 
-    // Get active tab (remove currentWindow constraint for side panel compatibility)
-    let tabs = await browser.tabs.query({
+    // Special handling for screenshot capture and download
+    if (toolName === "captureScreenshotAndDownload") {
+      const result = await captureScreenshotAndDownload(
+        message.params.filename || "screenshot.png",
+      );
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
+    // Special handling for file downloads
+    if (toolName === "downloadFile") {
+      const result = await downloadFile(
+        message.params.url,
+        message.params.filename,
+      );
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
+    // Special handling for opening new tabs
+    if (toolName === "openNewTab") {
+      const result = await openNewTab(message.params.url);
+      sendResponse({
+        type: "TOOL_RESPONSE",
+        requestId,
+        success: true,
+        data: result,
+      });
+      return;
+    }
+
+    // Get active tab
+    const tabs = await browser.tabs.query({
       active: true,
       currentWindow: true,
     });
-
-    // If no tab in current window, get the last active tab from any window
-    if (!tabs.length) {
-      tabs = await browser.tabs.query({ active: true });
-    }
-
     const activeTab = tabs[0];
 
     if (!activeTab?.id) {
@@ -213,24 +249,13 @@ async function handleToolCall(
         type: "TOOL_RESPONSE",
         requestId,
         success: false,
-        error:
-          "No active tab found. Please ensure you have a browser tab open.",
+        error: "No active tab found",
       });
       return;
     }
 
-    console.log(`[Background] Using tab ${activeTab.id}: ${activeTab.url}`);
-
     // Forward message to content script
-    console.log(
-      `[Background] Forwarding to content script on tab ${activeTab.id}:`,
-      message,
-    );
     const response = await browser.tabs.sendMessage(activeTab.id, message);
-    console.log(
-      `[Background] Received response from content script:`,
-      response,
-    );
     sendResponse(response);
   } catch (error: any) {
     console.error(`[Background] Tool call failed:`, error);
@@ -301,6 +326,123 @@ async function switchToTab(
     return {
       success: false,
       message: `Failed to switch tab: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Capture screenshot and immediately download it
+ */
+async function captureScreenshotAndDownload(filename: string): Promise<{
+  success: boolean;
+  message: string;
+  filename: string;
+  dataUrl: string;
+  timestamp: number;
+}> {
+  try {
+    // Capture the screenshot
+    const screenshot = await captureScreenshot();
+
+    // Download it
+    const downloadResult = await downloadFile(screenshot.dataUrl, filename);
+
+    if (!downloadResult.success) {
+      throw new Error(downloadResult.message);
+    }
+
+    return {
+      success: true,
+      message: `Screenshot saved as ${filename}`,
+      filename: filename,
+      dataUrl: screenshot.dataUrl,
+      timestamp: screenshot.timestamp,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `Failed to capture and download screenshot: ${error.message}`,
+      filename: filename,
+      dataUrl: "",
+      timestamp: Date.now(),
+    };
+  }
+}
+
+/**
+ * Download a file from a URL or data URL
+ */
+async function downloadFile(
+  url: string,
+  filename: string,
+): Promise<{ success: boolean; message: string; filename: string }> {
+  try {
+    console.log(
+      `[Background] Downloading file: ${filename} from ${url.substring(0, 100)}...`,
+    );
+
+    // Chrome's downloads API can handle data URLs directly
+    const downloadId = await browser.downloads.download({
+      url: url,
+      filename: filename,
+      saveAs: false,
+    });
+
+    console.log(`[Background] Download initiated with ID: ${downloadId}`);
+
+    return {
+      success: true,
+      message: `File downloaded successfully: ${filename}`,
+      filename: filename,
+    };
+  } catch (error: any) {
+    console.error(`[Background] Download failed:`, error);
+    return {
+      success: false,
+      message: `Failed to download file: ${error.message}`,
+      filename: filename,
+    };
+  }
+}
+
+/**
+ * Open a new tab with the specified URL
+ */
+async function openNewTab(url: string): Promise<{
+  success: boolean;
+  message: string;
+  tabId?: number;
+  url: string;
+}> {
+  try {
+    console.log(`[Background] Opening new tab with URL: ${url}`);
+
+    // Validate URL format
+    let fullUrl = url;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      fullUrl = `https://${url}`;
+    }
+
+    // Create new tab
+    const tab = await browser.tabs.create({
+      url: fullUrl,
+      active: true, // Make the new tab active
+    });
+
+    console.log(`[Background] New tab created with ID: ${tab.id}`);
+
+    return {
+      success: true,
+      message: `Opened new tab: ${fullUrl}`,
+      tabId: tab.id,
+      url: fullUrl,
+    };
+  } catch (error: any) {
+    console.error(`[Background] Failed to open new tab:`, error);
+    return {
+      success: false,
+      message: `Failed to open new tab: ${error.message}`,
+      url: url,
     };
   }
 }

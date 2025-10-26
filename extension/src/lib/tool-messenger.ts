@@ -33,13 +33,13 @@ export async function sendToolMessage<T = any>(
       reject(new Error(`Tool call timeout: ${toolName} (${timeout}ms)`));
     }, timeout);
 
-    // Send message and await response directly
+    // Send message to background script and wait for direct response
     browser.runtime
       .sendMessage(message)
       .then((response: ToolResponse<T>) => {
         clearTimeout(timeoutId);
 
-        if (response?.type === "TOOL_RESPONSE" && response?.success) {
+        if (response && response.success) {
           resolve(response);
         } else {
           reject(

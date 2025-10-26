@@ -1,33 +1,27 @@
 {
   "name": "one-more-big-beautiful-browser",
   "version": "1.0.0",
-  "description": "One More Big Beautiful Browser - Monorepo with extension, web, and server",
+  "description": "One More Big Beautiful Browser - Monorepo with extension and web",
   "private": true,
   "scripts": {
     "install:extension": "cd extension && pnpm install",
     "install:web": "cd web && pnpm install",
-    "install:server": "cd server && uv sync",
-    "install": "pnpm run install:extension && pnpm run install:web && pnpm run install:server",
+    "install": "pnpm run install:extension && pnpm run install:web",
     "dev:extension": "cd extension && pnpm dev",
     "dev:web": "cd web && pnpm dev -p 3001",
-    "dev:server": "cd server && SERVER_PORT=8000 uv run python main.py",
-    "dev": "concurrently -n \"extension,web,server\" -c \"blue,green,yellow\" \"pnpm run dev:extension\" \"pnpm run dev:web\" \"pnpm run dev:server\"",
+    "dev": "concurrently -n \"extension,web\" -c \"blue,green\" \"pnpm run dev:extension\" \"pnpm run dev:web\"",
     "start": "pnpm run dev",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,css,md}\"",
     "lint:extension": "cd extension && pnpm run compile",
     "lint:web": "cd web && pnpm run lint",
-    "lint:server": "cd server && uv run black --check .",
-    "lint": "pnpm run format:check && pnpm run lint:extension && pnpm run lint:web && pnpm run lint:server",
-    "lint:fix": "pnpm run format && cd server && uv run black .",
+    "lint": "pnpm run format:check && pnpm run lint:extension && pnpm run lint:web",
+    "lint:fix": "pnpm run format",
     "prepare": "husky"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,css,md}": [
       "prettier --write"
-    ],
-    "*.py": [
-      "cd server && uv run black"
     ]
   },
   "devDependencies": {
