@@ -274,11 +274,22 @@ export default function SignupPage() {
               label="Username"
               name="username"
               type="text"
-              placeholder="Enter your username"
+              placeholder="e.g. johndoe"
               variant="bordered"
               isInvalid={!!formState?.zodErrors?.username}
               errorMessage={formState?.zodErrors?.username?.[0]}
               isRequired
+              classNames={{
+                label: "text-default-600 font-medium",
+                inputWrapper: [
+                  "border-default-300",
+                  "hover:border-default-400",
+                  "focus-within:!border-primary",
+                  "!shadow-none",
+                  "h-14",
+                ].join(" "),
+                input: "placeholder:text-default-400",
+              }}
             />
 
             {/* Email Field */}
@@ -286,11 +297,22 @@ export default function SignupPage() {
               label="Email"
               name="email"
               type="email"
-              placeholder="Enter your email"
+              placeholder="e.g. john@example.com"
               variant="bordered"
               isInvalid={!!formState?.zodErrors?.email}
               errorMessage={formState?.zodErrors?.email?.[0]}
               isRequired
+              classNames={{
+                label: "text-default-600 font-medium",
+                inputWrapper: [
+                  "border-default-300",
+                  "hover:border-default-400",
+                  "focus-within:!border-primary",
+                  "!shadow-none",
+                  "h-14",
+                ].join(" "),
+                input: "placeholder:text-default-400",
+              }}
             />
 
             {/* Password Field */}
